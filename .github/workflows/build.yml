@@ -380,20 +380,24 @@ jobs:
             ort_arch: arm64
             ort_source: release
           # DirectML is the one Windows execution provider with no hardware
-          # requirement a CI runner can't meet in software, and the only one
-          # whose attach path is compiled behind a header the CPU archives do
-          # not ship: without a leg built against the DirectML package,
-          # src/nn/provider_select.cpp's DirectML code is never compiled at all.
-          # This leg builds it and asserts the provider is really there. It does
-          # not pin the provider for the suite, because whether a GitHub runner's
-          # software adapter can carry an actual DirectML attach is unproven; the
-          # step that tries is allowed to fail.
+          # requirement a CI runner can't meet in software, so this is the one
+          # worth a dedicated leg to prove attaches for real. attachDirectML
+          # registers through the generic AppendExecutionProvider("DML", ...)
+          # entry point (see provider_select.cpp), so it compiles into every
+          # Windows build regardless of which ONNX Runtime package supplied
+          # the headers; what only this leg's package supplies is a
+          # DirectML.dll actually sitting next to onnxruntime.dll for the
+          # delay-load to resolve. This leg builds against that package and
+          # asserts the provider is really there. It does not pin the
+          # provider for the suite, because whether a GitHub runner's
+          # software adapter can carry an actual DirectML attach is unproven;
+          # the step that tries is allowed to fail.
           - arch: x64
             label: x64-directml
             runner: windows-2025
             triplet: x64-windows
             ort_arch: x64
-            ort_source: nuget-directml
+            ort_source: nuget-windowsml
     runs-on: ${{ matrix.runner }}
     env:
       # Pinned rather than taken from the image: the x64 runner ships a vcpkg
@@ -471,29 +475,29 @@ jobs:
           "ORT_ROOT=$ortDir" | Out-File -FilePath $env:GITHUB_ENV -Append
           "$ortDir\lib" | Out-File -FilePath $env:GITHUB_PATH -Append
 
-      # DirectML ONNX Runtime is published only as a NuGet package, never as a
-      # release archive, so this leg feeds the build a package directory rather
-      # than an unpacked archive. -Donnxruntime_root understands that layout
-      # (runtimes/<rid>/native + build/native/include) directly; pointing at the
-      # package unmodified is deliberate, since hand-assembling a lib/+include/
-      # root is exactly the step this is meant to spare consumers.
+      # Microsoft.Windows.AI.MachineLearning (Windows ML) rather than the
+      # DirectML-flavoured Microsoft.ML.OnnxRuntime.DirectML package: the
+      # latter's ONNX Runtime version is permanently frozen at 1.24.4 on
+      # every channel Microsoft ships it through, NuGet and the PyPI wheel
+      # alike, because newer Windows work went into Windows ML instead. This
+      # package keeps shipping new ORT versions, so pin it like any other
+      # dependency and bump it over time instead of being stuck.
       #
-      # DirectML.dll itself is not in the ONNX Runtime package. It comes from
-      # Microsoft.AI.DirectML, which NuGet restores as a dependency, and it has
-      # to sit beside onnxruntime.dll for the delay-load to resolve, so it is
-      # copied into the package's own native directory.
+      # DirectML.dll ships in the same runtimes/<rid>/native directory as
+      # onnxruntime.dll in this package, so unlike the old DirectML leg there
+      # is no second package to restore and no DLL to copy across.
       #
-      # The version is pinned separately from the release-archive legs:
-      # DirectML builds of ONNX Runtime end at 1.24.4 on every channel
-      # Microsoft ships them through, NuGet and the PyPI wheel alike (newer
-      # Windows work went into Windows ML instead), so the release-archive
-      # version does not exist here. The leg compiles against the package's
-      # own bundled headers, so the two version streams never mix.
-      - name: Install ONNX Runtime (NuGet DirectML, Windows ${{ matrix.arch }})
-        if: matrix.ort_source == 'nuget-directml'
+      # -Donnxruntime_root understands this package's layout directly (see
+      # the three-way ORT discovery in meson.build): the import library lives
+      # under lib/native/<arch> rather than beside the DLL, which is a
+      # different on-disk shape from the classic NuGet layout, not a drop-in
+      # substitute for it — pointing at the package unmodified is deliberate,
+      # the same as the old leg.
+      - name: Install ONNX Runtime (NuGet Windows ML, Windows ${{ matrix.arch }})
+        if: matrix.ort_source == 'nuget-windowsml'
         shell: pwsh
         run: |
-          $ORT_VER = "1.24.4"
+          $ORT_VER = "2.2.12"
           if (-not (Get-Command nuget -ErrorAction SilentlyContinue)) {
             Invoke-WebRequest "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "$env:GITHUB_WORKSPACE\nuget.exe"
             $env:PATH = "$env:GITHUB_WORKSPACE;$env:PATH"
@@ -501,14 +505,11 @@ jobs:
           # Outside the workspace: Meson rejects include paths that resolve
           # inside the source tree.
           $nugetDir = "$env:USERPROFILE\nuget"
-          nuget install Microsoft.ML.OnnxRuntime.DirectML -Version $ORT_VER -OutputDirectory $nugetDir
+          nuget install Microsoft.Windows.AI.MachineLearning -Version $ORT_VER -OutputDirectory $nugetDir
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $pkg = Get-ChildItem $nugetDir -Directory -Filter "Microsoft.ML.OnnxRuntime.DirectML*" | Select-Object -First 1
-          $dml = Get-ChildItem $nugetDir -Directory -Filter "Microsoft.AI.DirectML*" | Select-Object -First 1
-          if (-not $pkg) { Write-Error "Microsoft.ML.OnnxRuntime.DirectML was not restored"; exit 1 }
-          if (-not $dml) { Write-Error "Microsoft.AI.DirectML was not restored; DirectML.dll would be missing"; exit 1 }
+          $pkg = Get-ChildItem $nugetDir -Directory -Filter "Microsoft.Windows.AI.MachineLearning*" | Select-Object -First 1
+          if (-not $pkg) { Write-Error "Microsoft.Windows.AI.MachineLearning was not restored"; exit 1 }
           $native = "$($pkg.FullName)\runtimes\win-${{ matrix.ort_arch }}\native"
-          Copy-Item "$($dml.FullName)\bin\${{ matrix.ort_arch }}-win\DirectML.dll" $native
           "ORT_ROOT=$($pkg.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
           "$native" | Out-File -FilePath $env:GITHUB_PATH -Append
 
@@ -540,7 +541,7 @@ jobs:
           # reads as "no provider to require". This asserts the linked package
           # really carries the provider this leg was built for, so picking up a
           # CPU-only ONNX Runtime by accident fails instead of passing quietly.
-          CHD_TEST_REQUIRE_ORT_PROVIDER: ${{ matrix.ort_source == 'nuget-directml' && '15' || '' }}
+          CHD_TEST_REQUIRE_ORT_PROVIDER: ${{ matrix.ort_source == 'nuget-windowsml' && '15' || '' }}
         run: meson test -C build --print-errorlogs
 
       # Whether a GitHub runner's software D3D12 adapter can carry a DirectML
@@ -550,7 +551,7 @@ jobs:
       # fallback — so a red step here means this runner has no usable adapter,
       # not that the DirectML path is broken.
       - name: Probe a real DirectML attach (informational)
-        if: matrix.ort_source == 'nuget-directml'
+        if: matrix.ort_source == 'nuget-windowsml'
         continue-on-error: true
         shell: pwsh
         env:

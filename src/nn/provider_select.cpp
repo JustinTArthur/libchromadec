@@ -19,15 +19,6 @@
 #include <dlfcn.h>
 #endif
 
-// DirectML's factory entry point lives in its own header, and only the
-// DirectML-flavoured ONNX Runtime packages ship it. Building against a
-// CPU-only Windows package leaves the DirectML attach path out entirely;
-// the runtime availability check keeps the chain from reaching it.
-#if defined(_WIN32) && __has_include(<dml_provider_factory.h>)
-#include <dml_provider_factory.h>
-#define CHD_HAVE_DML_PROVIDER 1
-#endif
-
 namespace chd::nn {
 
 namespace {
@@ -356,33 +347,29 @@ bool attachCoreML(Ort::SessionOptions &options, std::string *outError)
 }
 
 // ─── DirectML attach (Windows only) ──────────────────────────────────────
-// Plain device-0 attach via the legacy session-options C API. DirectML
-// doesn't have a V2 provider-options struct, so this is a one-call wire-up.
-// Future per-decoder tuning (device selection, deferred
-// memory, etc.) would live in chd_nn_session_opts_t but isn't wired
-// for now.
+// Uses the generic AppendExecutionProvider key-value entry point (same
+// shape as our CoreML and MIGraphX attaches) rather than the named
+// OrtSessionOptionsAppendExecutionProvider_DML export, which lives behind a
+// header that only some ONNX Runtime packages ship. The generic path is
+// wired up directly in onnxruntime.dll on every package we build against —
+// both the classic DirectML NuGet package and the Windows ML NuGet package
+// register "DML" through it — so the attach no longer depends on which
+// package supplied the build-time headers, only on whether the linked
+// onnxruntime.dll actually carries a DirectML.dll to delay-load beside it at
+// runtime. Validated end-to-end (session creation, Run, and profiled node
+// placement showing DmlExecutionProvider) against the Windows ML package.
 bool attachDirectML(Ort::SessionOptions &options, std::string *outError)
 {
-#if defined(CHD_HAVE_DML_PROVIDER)
+#if defined(_WIN32)
     try {
-        OrtStatus *status = OrtSessionOptionsAppendExecutionProvider_DML(options, /*device_id*/ 0);
-        if (status != nullptr) {
-            if (outError) {
-                *outError = std::string("OrtSessionOptionsAppendExecutionProvider_DML: ") +
-                            Ort::GetApi().GetErrorMessage(status);
-            }
-            Ort::GetApi().ReleaseStatus(status);
-            return false;
-        }
+        std::unordered_map<std::string, std::string> dmlOpts;
+        dmlOpts["device_id"] = "0";
+        options.AppendExecutionProvider("DML", dmlOpts);
         return true;
     } catch (const std::exception &e) {
         if (outError) *outError = e.what();
         return false;
     }
-#elif defined(_WIN32)
-    (void)options;
-    if (outError) *outError = "this build's ONNX Runtime package has no DirectML provider";
-    return false;
 #else
     (void)options;
     if (outError) *outError = "DirectML execution provider is only available on Windows";

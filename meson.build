@@ -85,11 +85,19 @@ fftw3_dep   = dependency('fftw3',   required: false)
 # producing a library bound to a path the consumer does not have and to whatever
 # version and provider set that copy happens to carry.
 #
-# Two on-disk layouts are accepted, because Microsoft publishes both. The
-# release archives put the library in lib/ beside include/. The NuGet packages
-# split them into runtimes/<rid>/native and build/native/include, and that is
-# the only form the DirectML-carrying Windows package is published in, so a
-# consumer who wants that execution provider has no archive to point at.
+# Three on-disk layouts are accepted, because Microsoft publishes all three.
+# The release archives put the library in lib/ beside include/, with the
+# runtime DLL alongside the import library. The classic NuGet packages
+# (Microsoft.ML.OnnxRuntime.DirectML and friends) split them into
+# runtimes/<rid>/native (import library and DLL together) and
+# build/native/include. The Windows ML NuGet package
+# (Microsoft.Windows.AI.MachineLearning) splits further still: the import
+# library moves to lib/native/<arch>, headers move to a flat include/, and
+# runtimes/<rid>/native keeps only the DLLs (onnxruntime.dll and DirectML.dll
+# bundled together, so this one form carries both without a second package to
+# restore). That third form is why each candidate below names its DLL
+# directory separately from its import-library directory instead of assuming
+# the two are the same place.
 ort_root    = get_option('onnxruntime_root')
 ort_dep     = dependency('', required: false)
 ort_dll_dir = ''
@@ -97,12 +105,21 @@ ort_incdirs = []
 if get_option('with_onnxruntime') and ort_root != ''
   fs = import('fs')
   nuget_rid = host_machine.cpu_family() == 'aarch64' ? 'win-arm64' : 'win-x64'
+  # The Windows ML package names its per-arch import-library folder without
+  # the win- prefix and without the CPU-family spelling nuget_rid uses.
+  winml_arch = host_machine.cpu_family() == 'aarch64' ? 'arm64' : 'x64'
   ort_libdirs = []
-  foreach candidate : [[ort_root / 'lib', ort_root / 'include'],
+  ort_dlldirs = []
+  foreach candidate : [[ort_root / 'lib', ort_root / 'include', ort_root / 'lib'],
                        [ort_root / 'runtimes' / nuget_rid / 'native',
-                        ort_root / 'build' / 'native' / 'include']]
+                        ort_root / 'build' / 'native' / 'include',
+                        ort_root / 'runtimes' / nuget_rid / 'native'],
+                       [ort_root / 'lib' / 'native' / winml_arch,
+                        ort_root / 'include',
+                        ort_root / 'runtimes' / nuget_rid / 'native']]
     if fs.is_dir(candidate[0])
       ort_libdirs += candidate[0]
+      ort_dlldirs += candidate[2]
     endif
     if fs.is_dir(candidate[1])
       ort_incdirs += candidate[1]
@@ -120,18 +137,22 @@ if get_option('with_onnxruntime') and ort_root != ''
   # execution-provider set than the one they chose the root for.
   if not ort_lib.found() or ort_incdirs.length() == 0
     error('onnxruntime_root=' + ort_root + ' is not a usable ONNX Runtime root. ' +
-          'Expected the release-archive layout (lib/ + include/) or the NuGet ' +
-          'package layout (runtimes/' + nuget_rid + '/native + ' +
-          'build/native/include). Pass a different root, drop the option to ' +
-          'discover ORT via pkg-config or CMake, or set -Dwith_onnxruntime=false.')
+          'Expected the release-archive layout (lib/ + include/), the classic ' +
+          'NuGet package layout (runtimes/' + nuget_rid + '/native + ' +
+          'build/native/include), or the Windows ML NuGet package layout ' +
+          '(lib/native/' + winml_arch + ' + include/ + runtimes/' + nuget_rid +
+          '/native). Pass a different root, drop the option to discover ORT ' +
+          'via pkg-config or CMake, or set -Dwith_onnxruntime=false.')
   endif
   ort_dep = declare_dependency(
     dependencies: ort_lib,
     include_directories: include_directories(ort_incdirs))
   # Where the runtime DLLs sit, for the Windows tests: the loader searches the
   # running executable's own directory ahead of System32, so they get copied
-  # beside the test binaries (see tests/meson.build).
-  ort_dll_dir = ort_libdirs[0]
+  # beside the test binaries (see tests/meson.build). Tracked separately from
+  # ort_libdirs because the Windows ML layout keeps the import library and the
+  # DLLs in different directories.
+  ort_dll_dir = ort_dlldirs.length() > 0 ? ort_dlldirs[0] : ''
 endif
 if not ort_dep.found()
   ort_dep = dependency('libonnxruntime', required: false)
