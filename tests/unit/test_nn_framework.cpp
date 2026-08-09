@@ -76,11 +76,27 @@ int testProviderAvailability() {
         REQUIRE(chd_nn_backend_is_available(CHD_NN_ORT_DIRECTML) == 0);
         REQUIRE(chd_nn_backend_is_available(CHD_NN_ORT_MIGRAPHX) == 0);
 #endif
+
+        // A CI leg that exists to cover one execution provider names it here,
+        // so picking up the wrong ONNX Runtime package fails the job instead of
+        // passing on a CPU-only runtime. Availability is a property of the
+        // linked ORT build rather than of the hardware, so this holds on a
+        // runner with no compatible device; whether that provider then attaches
+        // is what CHD_TEST_EXPECT_NN_BACKEND covers, on hosts that have one.
+        if (const char *require = std::getenv("CHD_TEST_REQUIRE_ORT_PROVIDER");
+            require != nullptr && *require != '\0') {
+            REQUIRE(chd_nn_backend_is_available(
+                        static_cast<chd_nn_backend_t>(std::atoi(require))) == 1);
+        }
     }
 
     // Native CoreML availability tracks its build feature flag, independent of
     // whether the ORT backend is present.
     REQUIRE(chd_nn_backend_is_available(CHD_NN_COREML) == (chd_has_feature("coreml") ? 1 : 0));
+
+    // 99 names no enumerator but is still a valid value of the enum type
+    // itself (fixed int32_t underlying type); it is simply never available.
+    REQUIRE(chd_nn_backend_is_available(static_cast<chd_nn_backend_t>(99)) == 0);
     return 0;
 }
 

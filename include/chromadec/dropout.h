@@ -2,6 +2,7 @@
 #ifndef CHROMADEC_DROPOUT_H
 #define CHROMADEC_DROPOUT_H
 
+#include <chromadec/enum.h>
 #include <chromadec/errors.h>
 #include <chromadec/types.h>
 
@@ -34,7 +35,7 @@ chd_status_t chd_decoder_get_last_dropout_stats(const chd_decoder_t *d,
 
 /* Where a reported span came from. Numeric-gapped per family so future
  * origins (extension metadata, other decoder detectors) can slot in. */
-typedef enum chd_dropout_origin {
+typedef CHD_ENUM(chd_dropout_origin) {
     CHD_DROPOUT_ORIGIN_SOURCE_METADATA     = 0,
 
     CHD_DROPOUT_ORIGIN_DECODER_CONCEALMENT = 8
@@ -56,7 +57,7 @@ typedef struct chd_dropout_span {
 } chd_dropout_span_t;
 
 /* Which dropout regions a detection query reports (mutually exclusive). */
-typedef enum chd_dropout_detect_mode {
+typedef CHD_ENUM(chd_dropout_detect_mode) {
     CHD_DROPOUT_DETECTED    = 0,  /* raw flagged regions */
     CHD_DROPOUT_OVERCORRECT = 1   /* detected, widened by the overcorrect margin */
 } chd_dropout_detect_mode_t;

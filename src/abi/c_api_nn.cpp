@@ -64,6 +64,7 @@ chd::nn::SessionOptions map_ort_opts(const chd_nn_session_opts_t *opts_or_null,
         if (opts_or_null->engine_cache_dir != nullptr) {
             opts.engineCacheDir = std::string(opts_or_null->engine_cache_dir);
         }
+        opts.precision = opts_or_null->precision;
     }
     return opts;
 }
@@ -99,6 +100,7 @@ void chd_nn_session_opts_default(chd_nn_session_opts_t *out) {
     /* NULL → auto-pick per-user cache dir; see chromadec/nn.h. */
     out->engine_cache_dir = nullptr;
     out->coreml_compute = CHD_NN_COREML_CPU_AND_GPU;
+    out->precision = CHD_NN_PRECISION_FP32;
     for (size_t i = 0; i < sizeof(out->reserved)/sizeof(out->reserved[0]); ++i) {
         out->reserved[i] = nullptr;
     }

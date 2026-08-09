@@ -2,6 +2,7 @@
 #ifndef CHROMADEC_NN_H
 #define CHROMADEC_NN_H
 
+#include <chromadec/enum.h>
 #include <chromadec/errors.h>
 #include <chromadec/types.h>
 
@@ -13,7 +14,7 @@ extern "C" {
  * ONNX Runtime execution providers (the CHD_NN_ORT_* infix), then native non-ORT
  * backends (CHD_NN_<name>, no ORT_ infix). Per-value semantics live in the docs
  * site. */
-typedef enum chd_nn_backend {
+typedef CHD_ENUM(chd_nn_backend) {
     CHD_NN_BACKEND_AUTO  = 0,   /* best across all backends; inferred from artifact */
 
     CHD_NN_ORT_AUTO      = 10,  /* ONNX Runtime, per-OS EP fallback chain */
@@ -29,11 +30,21 @@ typedef enum chd_nn_backend {
 
 /* Compute units for the native CoreML backend (CHD_NN_COREML); ignored by every
  * ONNX Runtime backend. */
-typedef enum chd_nn_coreml_compute {
+typedef CHD_ENUM(chd_nn_coreml_compute) {
     CHD_NN_COREML_CPU_AND_GPU = 0,  /* default: CPU + GPU, no ANE */
     CHD_NN_COREML_ALL         = 1,  /* CPU + GPU + Apple Neural Engine */
     CHD_NN_COREML_CPU_ONLY    = 2   /* CPU only */
 } chd_nn_coreml_compute_t;
+
+/* Inference compute precision. FP16_ALLOWED permits a backend that compiles
+ * the model into a device engine to build that engine with mixed fp16/fp32
+ * kernels; backends without such a mode ignore it and run the model at its
+ * stored precision. Only enable it for weights whose input contract keeps
+ * fp16 in range (see the docs site's NN-models page). */
+typedef CHD_ENUM(chd_nn_compute_precision) {
+    CHD_NN_PRECISION_FP32         = 0,  /* default */
+    CHD_NN_PRECISION_FP16_ALLOWED = 1
+} chd_nn_compute_precision_t;
 
 typedef struct chd_nn_session_opts {
     chd_nn_backend_t backend;       /* AUTO unless caller pins */
@@ -41,7 +52,9 @@ typedef struct chd_nn_session_opts {
     int     enable_graph_optim;     /* default 1 */
     int     enable_mem_pattern;     /* default 1 */
     /* Default 1 — our DecoderPool already parallelises across frames; setting
-     * intra-op > 1 oversubscribes CPU. */
+     * intra-op > 1 oversubscribes CPU. A consumer that decodes frames
+     * serially has no such parallelism and should raise intra_op_threads
+     * (or pass 0 for the ORT default) instead. */
     int32_t inter_op_threads;
     int32_t intra_op_threads;
     /* Native CoreML (CHD_NN_COREML) compute units; ignored otherwise. */
@@ -61,6 +74,10 @@ typedef struct chd_nn_session_opts {
      * Currently honoured by the TensorRT and MIGraphX EPs; the CUDA EP
      * uses its own internal PTX cache that isn't configurable here. */
     const char *engine_cache_dir;
+
+    /* Compute precision the backend may use for inference; see
+     * chd_nn_compute_precision_t. */
+    chd_nn_compute_precision_t precision;
 
     /* Reserved for future ABI extensions. Initialised to zero by
      * chd_nn_session_opts_default(); set to zero by callers building the

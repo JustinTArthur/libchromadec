@@ -37,6 +37,7 @@ struct SessionOptions {
     // NULL on the C ABI -> auto-pick a per-user cache dir. Empty string
     // = caller passed "" -> disable caching entirely.
     std::optional<std::string> engineCacheDir;
+    chd_nn_compute_precision_t precision = CHD_NN_PRECISION_FP32;
 };
 
 class OrtSession {

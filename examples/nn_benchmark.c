@@ -25,7 +25,7 @@
  *   nn_benchmark <file.tbc> <kind> <model.onnx|-> [options]
  *     kind      nntransform3d | color_cnn | luma_sep | luma_sep_frame | ntsc3d
  *     -b LIST   comma-separated backends to compare, in order. Default "cpu".
- *               Names: auto|cpu|cuda|tensorrt|migraphx|coreml|coreml_native
+ *               Names: auto|cpu|cuda|tensorrt|migraphx|directml|coreml|coreml_native
  *               "cpu" is prepended unless already present or -no-cpu is given.
  *     -no-cpu   omit the CPU baseline (then speedups are not reported)
  *     -M PATH   artifact for the native CoreML backend. That backend loads a
@@ -36,6 +36,11 @@
  *     -s SCALE  nn_input_magnitude_scale (nnTransform3D; 1.0 v1, 128.0 v2)
  *     -c DIR    engine cache dir; "" disables caching (cold-start timing)
  *     -t N      thread_count (default 1)
+ *     -u UNITS  native-CoreML compute units: cpu_and_gpu (default) | all |
+ *               cpu_only. "all" adds the ANE, which only engages for an
+ *               fp16-converted .mlpackage.
+ *     -p PREC   compute precision: fp32 (default) | fp16 (backends without a
+ *               reduced-precision engine mode ignore it)
  *
  * `ntsc3d` takes no model and exists as the non-neural baseline; pass "-" for
  * the model argument and it ignores -b.
@@ -111,6 +116,7 @@ static int parse_backend(const char *s, chd_nn_backend_t *out)
     else if (!strcmp(s, "cuda"))     *out = CHD_NN_ORT_CUDA;
     else if (!strcmp(s, "tensorrt")) *out = CHD_NN_ORT_TENSORRT;
     else if (!strcmp(s, "migraphx")) *out = CHD_NN_ORT_MIGRAPHX;
+    else if (!strcmp(s, "directml")) *out = CHD_NN_ORT_DIRECTML;
     else if (!strcmp(s, "coreml"))   *out = CHD_NN_ORT_COREML;
     else if (!strcmp(s, "coreml_native")) *out = CHD_NN_COREML;
     else return 0;
@@ -148,6 +154,8 @@ struct run_config {
     const char        *cache_dir;   /* NULL = library default */
     int                have_cache_opt;
     const char        *coreml_model; /* native-CoreML artifact, NULL if none */
+    chd_nn_coreml_compute_t    coreml_units;
+    chd_nn_compute_precision_t precision;
 };
 
 /* Native CoreML loads a .mlpackage; the ORT backends load the .onnx. */
@@ -181,6 +189,8 @@ static void run_cell(const struct run_config *cfg, struct cell *cell)
         chd_nn_session_opts_default(&nopts);
         nopts.backend = cell->requested;
         if (cfg->have_cache_opt) nopts.engine_cache_dir = cfg->cache_dir;
+        nopts.coreml_compute = cfg->coreml_units;
+        nopts.precision      = cfg->precision;
 
         const double t0 = now_ms();
         st = chd_nn_model_load_from_file(model_for(cfg, cell->requested), &nopts, &model);
@@ -245,13 +255,15 @@ int main(int argc, char **argv)
     if (argc < 4) {
         fprintf(stderr, "usage: %s <file.tbc> <kind> <model.onnx|-> [-b list] "
                         "[-no-cpu] [-n frames] [-w warmup] [-s scale] "
-                        "[-c cachedir] [-t threads]\n", argv[0]);
+                        "[-c cachedir] [-t threads] [-u units] [-p precision]\n", argv[0]);
         return 2;
     }
 
     struct run_config cfg = { .tbc = argv[1], .kind_s = argv[2], .model_path = argv[3],
                               .n_timed = 8, .n_warm = 2, .threads = 1, .scale = -1.0,
-                              .cache_dir = NULL, .have_cache_opt = 0 };
+                              .cache_dir = NULL, .have_cache_opt = 0,
+                              .coreml_units = CHD_NN_COREML_CPU_AND_GPU,
+                              .precision = CHD_NN_PRECISION_FP32 };
     if (!parse_kind(cfg.kind_s, &cfg.kind, &cfg.needs_model)) {
         fprintf(stderr, "unknown kind '%s'\n", cfg.kind_s);
         return 2;
@@ -273,6 +285,17 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-s") && i + 1 < argc) cfg.scale   = atof(argv[++i]);
         else if (!strcmp(argv[i], "-c") && i + 1 < argc) {
             cfg.cache_dir = argv[++i]; cfg.have_cache_opt = 1;
+        } else if (!strcmp(argv[i], "-u") && i + 1 < argc) {
+            const char *u = argv[++i];
+            if      (!strcmp(u, "cpu_and_gpu")) cfg.coreml_units = CHD_NN_COREML_CPU_AND_GPU;
+            else if (!strcmp(u, "all"))         cfg.coreml_units = CHD_NN_COREML_ALL;
+            else if (!strcmp(u, "cpu_only"))    cfg.coreml_units = CHD_NN_COREML_CPU_ONLY;
+            else { fprintf(stderr, "bad units '%s'\n", u); return 2; }
+        } else if (!strcmp(argv[i], "-p") && i + 1 < argc) {
+            const char *pr = argv[++i];
+            if      (!strcmp(pr, "fp32")) cfg.precision = CHD_NN_PRECISION_FP32;
+            else if (!strcmp(pr, "fp16")) cfg.precision = CHD_NN_PRECISION_FP16_ALLOWED;
+            else { fprintf(stderr, "bad precision '%s'\n", pr); return 2; }
         } else { fprintf(stderr, "unknown arg '%s'\n", argv[i]); return 2; }
     }
 

@@ -60,7 +60,9 @@ meson test -C build
 **Dependencies.** SQLite3 is required, and is fetched and built as a subproject
 when no system copy is found. ONNX Runtime is enabled by default and backs the
 neural decoders; if it is not discoverable, either point the build at it with
-`-Donnxruntime_root=/path/to/onnxruntime` or turn it off with
+`-Donnxruntime_root=/path/to/onnxruntime` (an unpacked release archive, or a
+restored NuGet package directory, which is the only form the DirectML build
+ships in) or turn it off with
 `-Dwith_onnxruntime=false`. FFTW3 is optional and gates Transform-PAL. CUDA,
 ROCm, and native CoreML are auto-detected and gate GPU inference. Run `meson
 configure build` to see every option.

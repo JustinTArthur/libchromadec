@@ -76,16 +76,29 @@ repeated on every function.
 
 ### Lifecycle
 
-Call [`chd_init`](#chd_init) once before any other call, and
-[`chd_shutdown`](#chd_shutdown) once before process exit **if any NN model was
-loaded**. See [Library lifecycle](#library-lifecycle) for why shutdown is not
-automatic.
+Call [`chd_init`](#chd_init) once before any other call.
+[`chd_shutdown`](#chd_shutdown) is an optional deterministic teardown for
+NN state; skipping it is safe. See [Library lifecycle](#library-lifecycle).
 
 The [diagnostic sink](#diagnostics) is the exception: `chd_set_log_callback`
 and `chd_set_log_level` may be called before `chd_init`, which is where you
 want them if you would rather not miss anything. The log state is never torn
 down, so they are equally safe from an `atexit` handler or a static
 destructor.
+
+### Enums
+
+Public enums are declared through the `CHD_ENUM` macro from
+`<chromadec/enum.h>`, included for you and never written in consumer code:
+
+```c
+typedef CHD_ENUM(chd_log_level) { ... } chd_log_level_t;
+```
+
+In C++ and C23 this fixes the underlying type to `int32_t`; C11 sees a plain
+enum with the same 4-byte representation. Every `int32_t` is a valid value of
+the enum type, so out-of-range arguments are rejected by validation instead of
+being undefined behaviour.
 
 ---
 
@@ -113,13 +126,16 @@ void chd_shutdown(void);
 Tear down process-wide library state: currently the ONNX Runtime environment
 singleton created the first time an NN model is loaded.
 
-!!! warning "Required after NN use, and never automatic"
-    If your process loaded **any** NN model ([`chd_nn_model_load_from_file`](#chd_nn_model_load_from_file)),
-    call `chd_shutdown()` exactly once before exit. It is deliberately *not*
-    registered with `atexit`: ORT execution-provider libraries run their own
-    static destructors on unload, and the ordering against an `atexit` teardown
-    is fragile (especially on Windows). If no NN model was ever loaded,
-    `chd_shutdown()` is a harmless no-op.
+!!! note "Optional, and never automatic"
+    Calling it is a choice, not a requirement. Without it the ONNX Runtime
+    environment is deliberately left alive through process exit — tearing it
+    down from static destructors or `atexit` would unload GPU
+    execution-provider libraries while their runtimes' own exit handlers are
+    still queued, which is a crash, so the library never does either. Call
+    `chd_shutdown()` at most once, after every decoder and model is freed,
+    when you want the teardown to happen at a moment you control (leak
+    checkers, hosts that reload the library). If no NN model was ever
+    loaded, it is a harmless no-op.
 
 ### chd_version / chd_version_string
 
@@ -252,7 +268,7 @@ from an error that has no other way of reaching anyone.
 ### chd_set_log_callback
 
 ```c
-typedef enum chd_log_level {
+typedef CHD_ENUM(chd_log_level) {
     CHD_LOG_DEBUG = 0,
     CHD_LOG_INFO  = 1,
     CHD_LOG_WARN  = 2,
@@ -1638,7 +1654,7 @@ whether concealment is enabled — and pair naturally with a
 [`CHD_DEC_NONE`](#chd_decoder_create) decoder to skip chroma decoding entirely.
 
 ```c
-typedef enum chd_dropout_origin {
+typedef CHD_ENUM(chd_dropout_origin) {
     CHD_DROPOUT_ORIGIN_SOURCE_METADATA     = 0,
     CHD_DROPOUT_ORIGIN_DECODER_CONCEALMENT = 8
 } chd_dropout_origin_t;
@@ -1660,7 +1676,7 @@ origins can slot in.
 ### chd_dropout_detect_mode_t
 
 ```c
-typedef enum chd_dropout_detect_mode {
+typedef CHD_ENUM(chd_dropout_detect_mode) {
     CHD_DROPOUT_DETECTED    = 0,
     CHD_DROPOUT_OVERCORRECT = 1
 } chd_dropout_detect_mode_t;
@@ -1732,7 +1748,7 @@ model and its execution-provider session.
 ### Backends
 
 ```c
-typedef enum chd_nn_backend {
+typedef CHD_ENUM(chd_nn_backend) {
     CHD_NN_BACKEND_AUTO  = 0,   /* best across all backends; inferred from artifact */
 
     CHD_NN_ORT_AUTO      = 10,  /* ONNX Runtime, per-OS EP fallback chain */
@@ -1768,7 +1784,7 @@ and distinguishable after load via
 ### CoreML compute units
 
 ```c
-typedef enum chd_nn_coreml_compute {
+typedef CHD_ENUM(chd_nn_coreml_compute) {
     CHD_NN_COREML_CPU_AND_GPU = 0,  /* default: CPU + GPU, no ANE */
     CHD_NN_COREML_ALL         = 1,  /* CPU + GPU + Apple Neural Engine */
     CHD_NN_COREML_CPU_ONLY    = 2   /* CPU only */
@@ -1776,9 +1792,11 @@ typedef enum chd_nn_coreml_compute {
 ```
 
 Applies to the native `CHD_NN_COREML` backend only (ignored by every ORT
-backend). The default `CHD_NN_COREML_CPU_AND_GPU` is required for nnTransform3D
-(the ANE cannot run its 3D convolution); `CHD_NN_COREML_ALL` lets CoreML use the
-ANE for ANE-friendly models.
+backend). `CHD_NN_COREML_ALL` adds the Apple Neural Engine, which executes
+fp16 only — an fp32-precision `.mlpackage` is ineligible for it wholesale, so
+`ALL` changes nothing for fp32 packages. For an fp16-converted package it is
+the fastest configuration for nnTransform3D `chroma_net` v2; see
+[NN models](nn-models.md#native-coreml-macos).
 
 ### Session options
 
@@ -1792,9 +1810,42 @@ typedef struct chd_nn_session_opts {
     int32_t intra_op_threads;            /* default 1 */
     const char *engine_cache_dir;        /* see below */
     chd_nn_coreml_compute_t coreml_compute; /* native CoreML only */
+    chd_nn_compute_precision_t precision;   /* see below */
     void *reserved[4];                   /* zero-initialised; do not repurpose */
 } chd_nn_session_opts_t;
 ```
+
+### Compute precision
+
+```c
+typedef enum chd_nn_compute_precision {
+    CHD_NN_PRECISION_FP32         = 0,  /* default */
+    CHD_NN_PRECISION_FP16_ALLOWED = 1
+} chd_nn_compute_precision_t;
+```
+
+`CHD_NN_PRECISION_FP16_ALLOWED` is a permission, not a mandate: a backend that
+compiles the model into a device engine may build that engine with mixed
+fp16/fp32 kernels (fp16 where it wins, fp32 where it doesn't). Backends
+without such an engine mode ignore the field and run the model at its stored
+precision — it never causes a load failure.
+
+The TensorRT EP honours it (`trt_fp16_enable`), keeping fp16 engines in an
+`fp16/` subdirectory of `engine_cache_dir` so precision modes never share a
+cached engine. The CUDA EP has no reduced-precision engine mode — it executes
+the model at its stored dtype — so fp16 through the CUDA EP would require an
+fp16-converted `.onnx` artifact instead of this field; the field is simply
+ignored there, as it is by every other EP without an engine mode.
+
+Only enable it for weights whose input contract keeps every tensor inside
+fp16 range. For nnTransform3D that means the v2 (÷128-scale) `chroma_net`
+weights; a v1-series model's unscaled magnitudes overflow fp16 and the output
+is unusable. See [model series and the magnitude
+scale](nn-models.md#model-series-and-the-magnitude-scale).
+
+Precision for the native CoreML backend is not selected here: it is baked
+into the `.mlpackage` at conversion time
+([details](nn-models.md#native-coreml-macos)).
 
 `engine_cache_dir` controls caching of compiled EP engines (TensorRT plans,
 MIGraphX binaries), which otherwise recompile on the first inference (a
@@ -1812,7 +1863,14 @@ PTX cache that is not configurable here.
 
 !!! note "Why threads default to 1"
     The decoder pool already parallelises across frames; raising the intra-op
-    thread count oversubscribes the CPU.
+    thread count oversubscribes the CPU. That reasoning assumes the pool's
+    frame-parallelism is actually in play: a consumer that pulls frames
+    **serially** (a plugin host that permits one in-flight request, for
+    instance) gets no parallelism from the pool, and a single-threaded CPU-EP
+    inference then costs up to several times what it should — measured 3.8-4.9×
+    on `chroma_net` and 2.2-2.8× on the ldzeug2 models on a 16-core machine.
+    Such consumers should raise `intra_op_threads` (or pass `0` for the ORT
+    default) alongside their `CHD_OPT_THREAD_COUNT` choice.
 
 The `reserved` array exists so future minor versions can add fields without
 breaking source compatibility; always leave it zeroed.
@@ -1825,9 +1883,9 @@ void chd_nn_session_opts_default(chd_nn_session_opts_t *out);
 ```
 
 Fill `*out` with default session options (`CHD_NN_BACKEND_AUTO`, the defaults
-noted above, `CHD_NN_COREML_CPU_AND_GPU`, zeroed reserved fields). Always
-initialise via this function rather than by hand, so new fields pick up correct
-defaults.
+noted above, `CHD_NN_COREML_CPU_AND_GPU`, `CHD_NN_PRECISION_FP32`, zeroed
+reserved fields). Always initialise via this function rather than by hand, so
+new fields pick up correct defaults.
 
 ### chd_nn_model_load_from_file / chd_nn_model_load_from_memory / chd_nn_model_free { #chd_nn_model_load_from_file }
 

@@ -201,9 +201,19 @@ int testLevelNames() {
     REQUIRE(std::string(chd_log_level_str(CHD_LOG_WARN)) == "WARN");
     REQUIRE(std::string(chd_log_level_str(CHD_LOG_ERROR)) == "ERROR");
     REQUIRE(std::string(chd_log_level_str(CHD_LOG_OFF)) == "OFF");
-    // The "UNKNOWN" fallback is for a C caller that passes an int outside the
-    // enumeration; it is not exercised here, because forming that value as a
-    // chd_log_level_t is itself the enum-range UB UBSan reports.
+    // 99 names no enumerator but is still a valid value of the enum type
+    // itself (fixed int32_t underlying type); it takes the fallback.
+    REQUIRE(std::string(chd_log_level_str(static_cast<chd_log_level_t>(99))) == "UNKNOWN");
+    return 0;
+}
+
+// Out-of-range thresholds clamp into the enumeration from both sides.
+int testLevelClamp() {
+    chd_set_log_level(static_cast<chd_log_level_t>(99));
+    REQUIRE(chd_get_log_level() == CHD_LOG_OFF);
+    chd_set_log_level(static_cast<chd_log_level_t>(-1));
+    REQUIRE(chd_get_log_level() == CHD_LOG_DEBUG);
+    chd_set_log_level(CHD_LOG_INFO);
     return 0;
 }
 
@@ -231,6 +241,7 @@ int main() {
     if (testOffIsNeverDeliverable() != 0) return 1;
     if (testReturnedFlag() != 0) return 1;
     if (testLevelNames() != 0) return 1;
+    if (testLevelClamp() != 0) return 1;
     if (testFailureStillReportsWithoutSink() != 0) return 1;
     std::cout << "test_log_abi: all tests passed\n";
     return 0;

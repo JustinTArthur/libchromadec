@@ -32,10 +32,10 @@ Load with
 embedded model), then attach
 to a neural decoder with
 [`chd_decoder_set_nn_model`](api-reference.md#chd_decoder_set_nn_model) before
-`commit`. The model is borrowed, so keep it alive for the decoder's lifetime,
-and call [`chd_shutdown`](api-reference.md#chd_shutdown) once before exit. See
-the [integration guide](integration-guide.md#neural-decoders) for the full
-sequence.
+`commit`. The model is borrowed, so keep it alive for the decoder's lifetime.
+[`chd_shutdown`](api-reference.md#chd_shutdown) offers optional deterministic
+teardown. See the [integration guide](integration-guide.md#neural-decoders)
+for the full sequence.
 
 ### Backends
 
@@ -50,6 +50,16 @@ and tries a platform-specific EP chain, using the first that loads:
 | Windows | TensorRT, CUDA, DirectML, CPU |
 | macOS | CoreML, CPU |
 | Linux / other | TensorRT, CUDA, MIGraphX, CPU |
+
+A chain only reaches the providers the linked ONNX Runtime was built with. On
+Windows that is a packaging choice rather than a hardware one: the release
+archives carry CPU alone (`onnxruntime-win-<arch>`) or CUDA plus TensorRT
+(`onnxruntime-win-x64-gpu`), while DirectML is published only as the
+`Microsoft.ML.OnnxRuntime.DirectML` NuGet package, and none of them carries
+both CUDA and DirectML. `-Donnxruntime_root=` takes either layout, the
+archive's `lib/` plus `include/` or the NuGet package directory as restored.
+See [shipping on Windows](integration-guide.md#shipping-on-windows) for which
+DLLs then have to travel with your binary.
 
 Pinning a specific `CHD_NN_ORT_*` provider tries only that one and returns
 `CHD_E_NN_BACKEND_UNAVAILABLE` if it is not present. Probe ahead of time with
@@ -101,16 +111,30 @@ Generate the `.mlpackage` offline from the ONNX model with `coremltools`:
     --height 263 --width 910
 ```
 
-The script converts at **fp32** (`--precision fp32`, the default), which every
-bundled model needs — the reference harness and our ONNX-Runtime runs are all
-fp32. coremltools' default fp16 makes the GPU path produce garbage: measured
-rel-RMS ≈ 0.7 for `chroma_net` (precision-sensitive FFT magnitudes) and ≈ 0.9
-for ldzeug2 `color_cnn` (fp16 wrecks its `Range`/`Gather`/`ScatterND` index
-math); fp16 also blocks the GPU-resident `outputBackings` path. At fp32,
+The script converts at **fp32** by default (`--precision fp32`). At fp32,
 nnTransform3D `chroma_net` and both ldzeug2 models (`color_cnn` and `luma_sep`)
 match ONNX Runtime to rel-RMS ≈ 2e-6 at every tested shape, and the
 GPU-resident Layer-2 nnTransform3D pipeline matches the FFTW Layer-1 pipeline
-to ≈ 3e-6. Don't use `--precision fp16` for the current weights.
+to ≈ 3e-6.
+
+`--precision fp16` is a **per-model** choice, valid only for weights whose
+input contract keeps every tensor inside fp16's ±65504 range:
+
+- **`chroma_net` v2 (the ÷128-scale weights) converts safely at fp16**: on
+  real-capture spectra its masks stay within rel-RMS ≈ 7e-4 of the fp32
+  reference and the decoded chroma within ≈ 2 LSB of 65535 — below tape
+  noise. An fp16 program is also what makes the model **ANE-eligible** (the
+  ANE only executes fp16), which is the fastest macOS configuration; see
+  [compute units](api-reference.md#coreml-compute-units) and Performance
+  below.
+- **v1-series `chroma_net` must stay fp32**: its contract feeds unscaled
+  magnitudes, which overflow fp16 and produce NaN masks.
+- **Both ldzeug2 models must stay fp32** regardless of scale: fp16 wrecks
+  `color_cnn`'s `Range`/`Gather`/`ScatterND` index math (rel-RMS ≈ 0.9).
+
+Either way the package presents fp32 inputs and outputs (the script pins the
+I/O dtypes, keeping the casts inside the program), so an fp16 package is a
+drop-in replacement at the engine boundary.
 
 The conversion route is ONNX → `onnx2torch` → TorchScript → `coremltools`. The
 script first applies two pre-passes `onnx2torch` needs: folding `Constant`-node
@@ -121,7 +145,9 @@ rewriting `SAME_UPPER` convolution padding to explicit pads.
 The `.mlpackage` artifacts are not committed; regenerate them per machine / in
 CI. Availability is reported by `chd_has_feature("coreml")` (false on non-Apple
 builds and when configured with `-Dwith_coreml=disabled`). The native engine
-runs on CPU+GPU (the Apple Neural Engine can't take `chroma_net`'s 3D conv); it
+defaults to CPU+GPU compute units; `CHD_NN_COREML_ALL` adds the ANE, which
+engages only for fp16-converted packages (the ANE is an fp16-only device — an
+fp32 program is ineligible for it wholesale, whatever its ops). The engine
 falls back to CPU-only if a GPU predict fails.
 
 Native CoreML is a self-contained backend and does **not** require ONNX Runtime.
@@ -169,6 +195,15 @@ Full pipeline, per frame (I/O → demod → NN → YUV):
 doesn't help nnTransform3D — it runs the 3D conv on CPU anyway and adds
 partition overhead, landing slightly *slower* than plain CPU.
 
+For `chroma_net` v2, an **fp16 package with `CHD_NN_COREML_ALL`** moves the
+convolution to the ANE and is the fastest macOS configuration measured — with
+the default FFTW FFT, ≈ 0.52 s/frame vs ≈ 0.77 s for the fp32/GPU package on
+one M4 Max (chips differ: the ANE-to-GPU ratio varies by generation, so
+benchmark per machine, e.g. `examples/nn_benchmark -b coreml_native -M
+chroma_net_fp16.mlpackage -s 128 -u all`). On the **GPU**, fp16 is slightly
+*slower* than fp32 (the boundary casts cost more than the kernels save), so
+an fp16 package without `ALL` buys nothing.
+
 NN inference in isolation, one ldzeug2 field `[1,C,263,910]`:
 
 | backend | color_cnn | luma_sep |
@@ -178,11 +213,12 @@ NN inference in isolation, one ldzeug2 field `[1,C,263,910]`:
 | ORT CPU, all cores | ≈ 110 ms | ≈ 392 ms |
 | ORT CPU, 1 thread | ≈ 782 ms | ≈ 3014 ms |
 
-`CpuAndGpu` and `All` measure identically (the model runs on the GPU; the ANE
-doesn't engage), so the default `CpuAndGpu` loses nothing.
+For these fp32 packages, `CpuAndGpu` and `All` measure identically (an fp32
+program can't be placed on the fp16-only ANE), so the default `CpuAndGpu`
+loses nothing.
 
 For nnTransform3D, the 3D FFT/window wrapping the model stay on the CPU
-(double-precision FFTW) by default — only the convolution moves to GPU. An
+(double-precision FFTW) by default — only the convolution moves to GPU/ANE. An
 experimental **GPU-resident** path (macOS 14+) is available by setting
 `CHD_NNTRANSFORM3D_COREML_FFT=mps`: the spectrum stays in shared
 unified-memory Metal buffers across the MPSGraph device FFT, the magnitude and
@@ -192,6 +228,10 @@ FFTW FFT on older macOS, when no Metal device is present, or on any
 setup/runtime failure. In practice it's **not worth enabling**: the run is
 conv-bound (the FFT is ~50 ms of the ~770 ms frame), so Layer 2 measured within
 1% of the FFTW default while running the FFT at lower precision (f32 vs f64).
+Do **not** combine it with `CHD_NN_COREML_ALL` and an fp16 package: a conv
+scheduled on the ANE has to sync/copy out of the Metal-resident buffers every
+chunk, and the combination measures slower than the plain FFTW path (the
+library warns when it detects this pairing).
 
 ## nnTransform3D (`chroma_net`)
 

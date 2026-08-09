@@ -6,3 +6,9 @@
 executable('nn_benchmark', 'nn_benchmark.c',
            dependencies: [chromadec_dep],
            install: false)
+
+# Raw plane dumps from one pinned NN backend, for byte-level A/B between two
+# configurations of the same model (engine precisions, providers, backends).
+executable('nn_plane_dump', 'nn_plane_dump.c',
+           dependencies: [chromadec_dep],
+           install: false)

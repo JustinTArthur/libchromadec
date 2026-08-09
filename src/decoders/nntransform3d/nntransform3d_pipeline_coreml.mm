@@ -26,6 +26,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -369,6 +370,20 @@ bool runCoreMLPipeline(
     bool useResident = false;
 #if defined(CHD_HAS_MPSGRAPH_FFT)
     if (fftStrategy() == FftStrategy::Mps) {
+        if (engine.computeUnits() == chd::nn::CoreMLComputeUnits::All) {
+            // The resident path keeps tensors in Metal buffers; a conv that
+            // CoreML schedules on the ANE has to sync/copy across the
+            // Metal/ANE boundary every chunk, which costs more than the
+            // device FFT saves. Warn once rather than second-guess the
+            // caller's compute-units choice.
+            static std::once_flag warned;
+            std::call_once(warned, [] {
+                chd::log::warn() << "nnTransform3D[CoreML]: MPSGraph FFT combined with"
+                                 << "compute units ALL forces Metal<->ANE transfers each"
+                                 << "chunk and measures slower than the FFTW FFT; prefer"
+                                 << "unsetting CHD_NNTRANSFORM3D_COREML_FFT with ALL";
+            });
+        }
         if (@available(macOS 14.0, *)) {
             useResident = residentMps().ensure(kBatchBlocks);
         }

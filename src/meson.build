@@ -95,9 +95,16 @@ if has_cuda
   chromadec_deps += [cuda_dep]
   chromadec_cpp_args += ['-DCHD_WITH_CUDA=1']
   # sm_60 (Pascal) is the floor for native FP64 atomicAdd, which the
-  # OLA kernel needs. The resulting PTX JITs up to Ampere/Ada/Hopper
-  # on newer GPUs at runtime.
-  chromadec_cuda_args += ['-arch=sm_60']
+  # OLA kernel needs. CUDA 13 dropped offline compilation for anything
+  # below Turing, so 13.x toolchains build at sm_75 instead (still above
+  # the atomicAdd floor); the resulting PTX JITs forward to newer GPUs
+  # at runtime either way. A CUDA 13 build therefore does not run on
+  # pre-Turing cards; ship a CUDA 12 build for those.
+  if cuda_dep.version().version_compare('>=13.0')
+    chromadec_cuda_args += ['-arch=sm_75']
+  else
+    chromadec_cuda_args += ['-arch=sm_60']
+  endif
 endif
 
 if has_rocm
@@ -112,9 +119,12 @@ if has_rocm
     '-I' + meson.project_source_root() / 'src',
     '-I' + meson.project_build_root() / 'include',
   ]
-  if get_option('onnxruntime_root') != ''
-    rocm_compile_args += '-I' + get_option('onnxruntime_root') / 'include'
-  endif
+  # The include directories resolved from -Donnxruntime_root, rather than the
+  # option joined with 'include': a root can also be a NuGet package, whose
+  # headers live somewhere else entirely.
+  foreach incdir : ort_incdirs
+    rocm_compile_args += '-I' + incdir
+  endforeach
   # hipcc writes the header dependencies with -MD -MF; without a depfile Meson
   # would treat the object as depending on the .cpp alone and editing any header
   # it includes would leave a stale object behind.

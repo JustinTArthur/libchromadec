@@ -289,6 +289,16 @@ int testSyncDecodeBlackMono(const fs::path &dir) {
         chd_decoder_free(ntsc3d);
     }
 
+    {
+        // A kind that names no enumerator is still a valid value of the enum
+        // type itself (fixed int32_t underlying type): accepted at create,
+        // rejected at commit.
+        chd_decoder_t *unknown = nullptr;
+        REQUIRE(chd_decoder_create(video, static_cast<chd_decoder_kind_t>(99), &unknown) == CHD_OK);
+        REQUIRE(chd_decoder_commit(unknown) == CHD_E_DECODER_UNKNOWN);
+        chd_decoder_free(unknown);
+    }
+
     chd_frame_t *bad = nullptr;
     REQUIRE(chd_decode_frame(dec, 0, &bad) == CHD_E_INVALID_ARG);
     REQUIRE(bad == nullptr);

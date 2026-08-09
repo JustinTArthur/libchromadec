@@ -123,6 +123,59 @@ it empty to skip installing them.
 vendoring a built install tree therefore keeps it working, with no rewriting of
 `prefix=` by hand, as long as the internal layout is preserved.
 
+## Shipping on Windows
+
+libchromadec does not link ONNX Runtime statically, so a Windows application
+that uses the neural decoders has to ship it, and where those DLLs sit decides
+whether the build works at all.
+
+**Put `onnxruntime.dll` in the same directory as the executable that loads
+it.** Windows searches `System32` ahead of every `PATH` entry, and Windows ML
+installs its own copy of `onnxruntime.dll` there (v1.17 on Windows Server 2025,
+among others). A copy reachable only through `PATH` therefore loses to it, and
+that older runtime is too old for the API version these headers ask for: its
+`GetApi` returns a null `OrtApi` that faults on first use, which surfaces as
+`STATUS_ACCESS_VIOLATION` (0xC0000005) at startup rather than as a version
+error. The executable's own directory is the one location searched before
+`System32`.
+
+**Ship the execution provider alongside it.** ONNX Runtime resolves its
+providers relative to the `onnxruntime.dll` that loaded, so they travel as a
+set:
+
+| Provider | Ships as | Where it comes from |
+|---|---|---|
+| CPU | built into `onnxruntime.dll` | any package |
+| DirectML | `DirectML.dll`, delay-loaded by name | `Microsoft.AI.DirectML`, restored as a dependency of the `Microsoft.ML.OnnxRuntime.DirectML` NuGet package, not in the ONNX Runtime package itself |
+| CUDA / TensorRT | `onnxruntime_providers_cuda.dll`, `onnxruntime_providers_tensorrt.dll`, `onnxruntime_providers_shared.dll` | the `onnxruntime-win-x64-gpu` release archive; the CUDA and TensorRT runtimes themselves are the user's to install |
+
+No published Windows package carries both CUDA and DirectML, so the auto chain
+a build can actually reach is bounded by the package it linked. Pick the
+package for the provider you intend to ship.
+
+!!! warning "Bundlers: what not to touch"
+    Tools that vendor a binary's dependencies (delvewheel, PyInstaller and the
+    like) will break an otherwise working ONNX Runtime unless told to leave
+    parts of it alone.
+
+    - **Providers are `LoadLibrary`'d by exact filename**, not linked, so a
+      bundler neither finds them by walking imports nor may rename them. Add
+      them by hand and exclude them from name mangling.
+    - **`D3D12.dll`, `DXCore.dll` and `dxgi.dll` are OS components.** Never
+      vendor them. A bundler that does will rename its copies and then patch
+      `DirectML.dll`'s delay-import table in place to match, which corrupts
+      `DirectML.dll` enough to fault the moment anything touches ONNX Runtime.
+      The failure appears at `Ort::Env` construction, before any provider is
+      selected, so it takes down a CPU-only decode too and reads as a bug
+      anywhere but where it is.
+    - **`ext-ms-win-gdi-internal-uap-init-l1-1-0.dll` is an API set**, a
+      virtual name the loader resolves itself and never a file on disk.
+      Dependency walkers cannot resolve it and have to be told to stop
+      looking.
+
+`.onnx` weights are data, not code: put them anywhere and pass the path to
+[`chd_nn_model_load_from_file`](api-reference.md#chd_nn_model_load_from_file).
+
 ## Consuming as a Meson subproject
 
 The linking examples above assume libchromadec is already installed to a prefix
@@ -244,7 +297,7 @@ int main(void) {
     /* 5. Free in reverse order: decoder borrows the video, so it goes first. */
     chd_decoder_free(dec);
     chd_video_free(video);
-    chd_shutdown();              /* required only if an NN model was loaded */
+    chd_shutdown();              /* optional deterministic NN teardown */
     return 0;
 }
 ```
@@ -380,11 +433,13 @@ chd_decoder_commit(dec);
 The model is **borrowed**, not owned. Keep it alive for the decoder's
 lifetime, free the decoder first, then `chd_nn_model_free(model)`.
 
-!!! warning "Shutdown after NN use"
-    Once any model has been loaded, call
-    [`chd_shutdown`](api-reference.md#chd_shutdown) exactly once before process
-    exit. It tears down the ONNX Runtime environment and is intentionally never
-    automatic. Skip it and you risk a static-destruction crash on exit.
+!!! note "Shutdown after NN use"
+    [`chd_shutdown`](api-reference.md#chd_shutdown) tears down the ONNX
+    Runtime environment deterministically; call it at most once, after every
+    decoder and model is freed. It is optional: without it the environment is
+    deliberately left alive through process exit, which is safe — a host that
+    cannot control destructor ordering (a plugin, an interpreter) can simply
+    never call it.
 
 Backend availability can be probed up front with
 [`chd_nn_backend_is_available`](api-reference.md#chd_nn_backend_is_available),

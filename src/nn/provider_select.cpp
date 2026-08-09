@@ -4,10 +4,14 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <system_error>
+
+#include "../common/log.h"
 #include <mutex>
 #include <regex>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -393,8 +397,16 @@ bool attachDirectML(Ort::SessionOptions &options, std::string *outError)
 // input shapes load the cached engine and skip the multi-minute build.
 // Requires the CUDA driver to be loaded since TensorRT runs on the same
 // hardware as CUDA EP.
+//
+// CHD_NN_PRECISION_FP16_ALLOWED maps to trt_fp16_enable=1 (TensorRT builds
+// the engine with fp16 kernels where they win, fp32 where they don't). The
+// engine cache is segregated into an fp16/ subdirectory in that mode: the
+// EP does not reliably invalidate a cached engine when the precision flags
+// change, so sharing one directory can serve an fp32 engine to an fp16
+// session or vice versa.
 bool attachTensorRT(Ort::SessionOptions &options,
                     const EngineCacheConfig &cache,
+                    chd_nn_compute_precision_t precision,
                     std::string *outError)
 {
     std::string driverError;
@@ -402,6 +414,23 @@ bool attachTensorRT(Ort::SessionOptions &options,
         if (outError) *outError = "TensorRT requires CUDA driver: " + driverError;
         return false;
     }
+    const bool fp16 = precision == CHD_NN_PRECISION_FP16_ALLOWED;
+
+    std::string cacheDir = cache.dir;
+    if (!cacheDir.empty() && fp16) {
+        std::error_code ec;
+        const auto sub = std::filesystem::path(cacheDir) / "fp16";
+        std::filesystem::create_directories(sub, ec);
+        if (ec) {
+            chd::log::warn() << "chd_nn: failed to create fp16 engine cache dir"
+                             << sub.string() << ":" << ec.message()
+                             << "(TensorRT engine caching disabled)";
+            cacheDir.clear();
+        } else {
+            cacheDir = sub.string();
+        }
+    }
+
     const auto &api = Ort::GetApi();
     OrtTensorRTProviderOptionsV2 *trtOptions = nullptr;
     OrtStatus *status = api.CreateTensorRTProviderOptions(&trtOptions);
@@ -412,10 +441,21 @@ bool attachTensorRT(Ort::SessionOptions &options,
         return false;
     }
 
-    if (!cache.dir.empty()) {
-        const char *keys[]   = { "trt_engine_cache_enable", "trt_engine_cache_path" };
-        const char *values[] = { "1", cache.dir.c_str() };
-        status = api.UpdateTensorRTProviderOptions(trtOptions, keys, values, 2);
+    std::vector<const char *> keys;
+    std::vector<const char *> values;
+    if (fp16) {
+        keys.push_back("trt_fp16_enable");
+        values.push_back("1");
+    }
+    if (!cacheDir.empty()) {
+        keys.push_back("trt_engine_cache_enable");
+        values.push_back("1");
+        keys.push_back("trt_engine_cache_path");
+        values.push_back(cacheDir.c_str());
+    }
+    if (!keys.empty()) {
+        status = api.UpdateTensorRTProviderOptions(trtOptions, keys.data(), values.data(),
+                                                   keys.size());
         if (status != nullptr) {
             if (outError) *outError = std::string("UpdateTensorRTProviderOptions: ") +
                                       api.GetErrorMessage(status);
@@ -481,48 +521,84 @@ bool attachMIGraphX(Ort::SessionOptions &options,
 #endif
 }
 
-// ORT loads the MIGraphX EP by dlopening libonnxruntime_providers_migraphx.so
-// and dlcloses it again when the last OrtEnv is released. That unload cascades
-// through the whole MIGraphX/ROCm stack, but libmigraphx queues exit handlers
-// that survive the unload (a static vector of migraphx::dynamic_loader, whose
-// destructor libc still runs from exit()). In a with_rocm build our own link
-// against the HIP runtime keeps ROCm resident across that unload, so the
-// stack really is torn out from under the queued handler and the process
-// takes a SIGSEGV after main returns. Promoting the provider library to
-// RTLD_NODELETE turns ORT's dlclose into a refcount drop that never unmaps,
-// so the handlers run against live code at exit.
-void pinMIGraphXProviderLibrary()
+// ORT loads GPU execution providers by dlopening their libraries
+// (libonnxruntime_providers_{migraphx,cuda,tensorrt,shared}.so) and dlcloses
+// them again when the last OrtEnv is released. Each provider's runtime stack
+// queues work that outlives that unload: libmigraphx registers exit handlers
+// (a static vector of migraphx::dynamic_loader whose destructor libc runs
+// from exit()), and the CUDA/TensorRT providers leave atexit handlers and
+// static destructors from cudart/cuDNN/nvinfer behind. Once the library is
+// unmapped, those handlers run against unmapped code and the process takes a
+// SIGSEGV after main returns — a crash whose backtrace shows a PC inside no
+// loaded library and no valid caller frame. Promoting the provider library
+// to RTLD_NODELETE turns ORT's dlclose into a refcount drop that never
+// unmaps, so the handlers run against live code at exit.
+void pinProviderLibraries(chd_nn_backend_t provider)
 {
 #if defined(__linux__)
-    static std::once_flag onceFlag;
-    std::call_once(onceFlag, []() {
-        const char *soname = "libonnxruntime_providers_migraphx.so";
-        const int   flags  = RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE;
-        // The provider sits beside whichever libonnxruntime this process
-        // loaded; resolve that directory rather than trusting the search
-        // path to agree with ORT's own lookup.
-        Dl_info info{};
-        if (dladdr(reinterpret_cast<void *>(&OrtGetApiBase), &info) != 0 &&
-            info.dli_fname != nullptr) {
-            // Pin the ORT core on the same terms. The provider's registry
-            // holds pointers into the ORT instance that first loaded it, so
-            // the two have to stay mapped together: a host that unloads
-            // libchromadec and loads it again would otherwise reach a fresh
-            // ORT through the surviving provider and fault in
-            // InitializeRegistry against the previous ORT's dead state.
-            dlopen(info.dli_fname, flags);
+    // The TensorRT provider layers on the CUDA one; both route dispatch
+    // through the shared provider bridge, so each pin set includes its
+    // full dependency chain. RTLD_NOLOAD makes a listed library that this
+    // session never loaded a no-op rather than a fresh load.
+    static const char *const cudaSet[]     = { "libonnxruntime_providers_cuda.so",
+                                               "libonnxruntime_providers_shared.so" };
+    static const char *const tensorrtSet[] = { "libonnxruntime_providers_tensorrt.so",
+                                               "libonnxruntime_providers_cuda.so",
+                                               "libonnxruntime_providers_shared.so" };
+    static const char *const migraphxSet[] = { "libonnxruntime_providers_migraphx.so",
+                                               "libonnxruntime_providers_shared.so" };
+
+    const char *const *sonames = nullptr;
+    size_t             count   = 0;
+    switch (provider) {
+        case CHD_NN_ORT_CUDA:     sonames = cudaSet;     count = 2; break;
+        case CHD_NN_ORT_TENSORRT: sonames = tensorrtSet; count = 3; break;
+        case CHD_NN_ORT_MIGRAPHX: sonames = migraphxSet; count = 2; break;
+        default:                  return;  // no dlopen'd provider library
+    }
+
+    static std::mutex pinMutex;
+    static std::unordered_set<std::string> pinned;
+    std::lock_guard<std::mutex> lock(pinMutex);
+
+    const int flags = RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE;
+
+    // The providers sit beside whichever libonnxruntime this process loaded;
+    // resolve that directory rather than trusting the search path to agree
+    // with ORT's own lookup.
+    Dl_info info{};
+    const bool haveOrtDir =
+        dladdr(reinterpret_cast<void *>(&OrtGetApiBase), &info) != 0 &&
+        info.dli_fname != nullptr;
+
+    if (haveOrtDir && pinned.insert(info.dli_fname).second) {
+        // Pin the ORT core on the same terms. A provider's registry holds
+        // pointers into the ORT instance that first loaded it, so the two
+        // have to stay mapped together: a host that unloads libchromadec
+        // and loads it again would otherwise reach a fresh ORT through the
+        // surviving provider and fault in InitializeRegistry against the
+        // previous ORT's dead state.
+        dlopen(info.dli_fname, flags);
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+        if (!pinned.insert(sonames[i]).second) continue;
+        if (haveOrtDir) {
             const std::string path =
-                (std::filesystem::path(info.dli_fname).parent_path() / soname).string();
-            if (dlopen(path.c_str(), flags) != nullptr) return;
+                (std::filesystem::path(info.dli_fname).parent_path() / sonames[i]).string();
+            if (dlopen(path.c_str(), flags) != nullptr) continue;
         }
-        dlopen(soname, flags);
-    });
+        dlopen(sonames[i], flags);
+    }
+#else
+    (void)provider;
 #endif
 }
 
 bool attachProviderChain(Ort::SessionOptions &options,
                          const std::vector<ProviderPreference> &chain,
                          const EngineCacheConfig &cache,
+                         chd_nn_compute_precision_t precision,
                          ProviderPreference *outAttached,
                          std::string *outError)
 {
@@ -540,7 +616,7 @@ bool attachProviderChain(Ort::SessionOptions &options,
             case CHD_NN_ORT_CUDA:     ok = attachCuda    (options, &err);        break;
             case CHD_NN_ORT_COREML:   ok = attachCoreML  (options, &err);        break;
             case CHD_NN_ORT_DIRECTML: ok = attachDirectML(options, &err);        break;
-            case CHD_NN_ORT_TENSORRT: ok = attachTensorRT(options, cache, &err); break;
+            case CHD_NN_ORT_TENSORRT: ok = attachTensorRT(options, cache, precision, &err); break;
             case CHD_NN_ORT_MIGRAPHX: ok = attachMIGraphX(options, cache, &err); break;
             default:
                 // AUTO sentinels and non-ORT backends can't appear in a

@@ -88,6 +88,28 @@ impl CoremlCompute {
     }
 }
 
+/// Inference compute precision (`chd_nn_compute_precision_t`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ComputePrecision {
+    #[default]
+    Fp32,
+    /// Permit a backend with a reduced-precision engine mode (TensorRT) to
+    /// build a mixed fp16/fp32 engine. Backends without one ignore it. Only
+    /// enable for weights whose input contract keeps fp16 in range.
+    Fp16Allowed,
+}
+
+impl ComputePrecision {
+    fn raw(self) -> sys::chd_nn_compute_precision {
+        match self {
+            ComputePrecision::Fp32 => sys::chd_nn_compute_precision::CHD_NN_PRECISION_FP32,
+            ComputePrecision::Fp16Allowed => {
+                sys::chd_nn_compute_precision::CHD_NN_PRECISION_FP16_ALLOWED
+            }
+        }
+    }
+}
+
 /// Compiled-engine cache directory policy (`engine_cache_dir`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum EngineCacheDir {
@@ -111,6 +133,7 @@ pub struct SessionOpts {
     pub intra_op_threads: i32,
     pub coreml_compute: CoremlCompute,
     pub engine_cache_dir: EngineCacheDir,
+    pub precision: ComputePrecision,
 }
 
 impl Default for SessionOpts {
@@ -126,6 +149,7 @@ impl Default for SessionOpts {
             intra_op_threads: raw.intra_op_threads,
             coreml_compute: CoremlCompute::default(),
             engine_cache_dir: EngineCacheDir::Auto,
+            precision: ComputePrecision::default(),
         }
     }
 }
@@ -143,6 +167,7 @@ impl SessionOpts {
         raw.inter_op_threads = self.inter_op_threads;
         raw.intra_op_threads = self.intra_op_threads;
         raw.coreml_compute = self.coreml_compute.raw();
+        raw.precision = self.precision.raw();
         // An owned CString backs an explicit cache path and must outlive the
         // returned struct; Auto (null) and Disabled (empty literal) own nothing.
         let cache = match &self.engine_cache_dir {

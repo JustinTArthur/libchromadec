@@ -3,6 +3,7 @@ public_headers = files(
   'chromadec/chromadec.h',
   'chromadec/decoder.h',
   'chromadec/dropout.h',
+  'chromadec/enum.h',
   'chromadec/errors.h',
   'chromadec/frame.h',
   'chromadec/log.h',

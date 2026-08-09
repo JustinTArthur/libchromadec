@@ -100,7 +100,8 @@ Ort::SessionOptions OrtSession::prepareSessionOptions(const SessionOptions &opts
     const auto chain = buildAutoChain(opts.requestedProvider);
     std::string attachError;
     chd_nn_backend_t attached = CHD_NN_ORT_CPU;
-    if (!attachProviderChain(sessionOptions, chain, cache, &attached, &attachError)) {
+    if (!attachProviderChain(sessionOptions, chain, cache, opts.precision,
+                             &attached, &attachError)) {
         throw std::runtime_error("provider attach failed: " + attachError);
     }
     activeBackend_ = attached;
@@ -125,10 +126,10 @@ OrtSession::OrtSession(const std::string &modelPath, const SessionOptions &opts)
         throw std::runtime_error(std::string("Ort::Session create: ") + e.what());
     }
 
-    // The MIGraphX provider library must never be unmapped once a session
-    // has used it (see pinMIGraphXProviderLibrary). Pin after creation, the
-    // first point where the provider is guaranteed loaded.
-    if (activeBackend_ == CHD_NN_ORT_MIGRAPHX) pinMIGraphXProviderLibrary();
+    // A dlopen'd provider library must never be unmapped once a session has
+    // used it (see pinProviderLibraries). Pin after creation, the first
+    // point where the provider is guaranteed loaded.
+    pinProviderLibraries(activeBackend_);
 }
 
 OrtSession::OrtSession(const void *modelData, size_t modelSize, const SessionOptions &opts)
@@ -143,7 +144,7 @@ OrtSession::OrtSession(const void *modelData, size_t modelSize, const SessionOpt
         throw std::runtime_error(std::string("Ort::Session create from memory: ") + e.what());
     }
 
-    if (activeBackend_ == CHD_NN_ORT_MIGRAPHX) pinMIGraphXProviderLibrary();
+    pinProviderLibraries(activeBackend_);
 }
 
 const std::vector<std::string> &OrtSession::inputNames()

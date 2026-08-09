@@ -2,6 +2,7 @@
 #ifndef CHROMADEC_DECODER_H
 #define CHROMADEC_DECODER_H
 
+#include <chromadec/enum.h>
 #include <chromadec/errors.h>
 #include <chromadec/types.h>
 
@@ -9,7 +10,7 @@
 extern "C" {
 #endif
 
-typedef enum chd_decoder_kind {
+typedef CHD_ENUM(chd_decoder_kind) {
     CHD_DEC_AUTO              = 0,
     CHD_DEC_MONO              = 1,
     CHD_DEC_NTSC_1D           = 2,

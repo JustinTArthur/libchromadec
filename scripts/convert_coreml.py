@@ -66,13 +66,14 @@ import sys
 # ONNX -> torch -> coremltools route.
 try:
     import coremltools as ct
+    import numpy as np
     import onnx
     import torch
     from onnx import helper
     from onnx2torch import convert as onnx_to_torch
     _IMPORT_ERROR = None
 except ImportError as exc:  # pragma: no cover - environment guard
-    ct = onnx = torch = helper = onnx_to_torch = None
+    ct = np = onnx = torch = helper = onnx_to_torch = None
     _IMPORT_ERROR = exc
 
 # nnTransform3D tile-batch size. MUST match kBatchBlocks in
@@ -191,20 +192,27 @@ def convert(model_type, onnx_path, out_path, compute_units, precision, height, w
         "cpuonly": ct.ComputeUnit.CPU_ONLY,
     }[compute_units]
 
-    # FLOAT32 is the default and is what every bundled model needs.
-    # coremltools' mlprogram default of FLOAT16 makes the GPU path produce
-    # garbage vs the fp32 ONNX/CPU reference (the harness and our ORT runs are
-    # all fp32): measured rel-RMS ~0.7 for chroma_net (precision-sensitive FFT
-    # magnitudes) and ~0.9 for ldzeug2 color_cnn (fp16 wrecks its Range/Gather/
-    # ScatterND index math). fp16 also blocks the GPU-resident outputBackings
-    # path (fp16 output desc). The fp16 option is retained only for a
-    # hypothetical fp16-safe model; do not use it for the current weights.
+    # FLOAT32 is the default. fp16 is per-model: only weights whose input
+    # contract keeps every tensor inside fp16 range can take it — of the
+    # supported models that is nnTransform3D chroma_net v2 (the ÷128 input
+    # scale exists precisely so the spectrum fits fp16; a v1-series model's
+    # unscaled magnitudes overflow 65504 and the masks come out NaN). Both
+    # ldzeug2 models stay fp32 regardless of scale: fp16 wrecks color_cnn's
+    # Range/Gather/ScatterND index math (rel-RMS ~0.9). An fp16 program is
+    # also what makes the model ANE-eligible (the ANE runs fp16 only), so
+    # convert fp16 when targeting CHD_NN_COREML_ALL.
     prec = ct.precision.FLOAT16 if precision == "fp16" else ct.precision.FLOAT32
 
+    # I/O dtypes are pinned to fp32 in both modes. Left unpinned, an fp16
+    # conversion flips the declared I/O descriptors to FLOAT16, which breaks
+    # the engine's fp32 outputBackings fast path; pinned, the casts live
+    # inside the program and the package presents the same interface as the
+    # fp32 one.
     print(f"converting -> {out_path} (compute_units={compute_units}, precision={precision})")
     mlmodel = ct.convert(
         traced,
-        inputs=[ct.TensorType(name=name, shape=input_dims)],
+        inputs=[ct.TensorType(name=name, shape=input_dims, dtype=np.float32)],
+        outputs=[ct.TensorType(dtype=np.float32)],
         compute_units=units,
         compute_precision=prec,
         minimum_deployment_target=ct.target.macOS13,
@@ -226,9 +234,10 @@ def main():
                    help="CoreML compute units to bake into the package "
                         "(use cpuandgpu for the nnTransform3D Layer-2 GPU-FFT path)")
     p.add_argument("--precision", default="fp32", choices=["fp32", "fp16"],
-                   help="compute precision (fp32 default and required for all "
-                        "bundled models; fp16 produces garbage GPU output — "
-                        "rel-RMS ~0.7 chroma_net, ~0.9 ldzeug2 color_cnn)")
+                   help="compute precision. fp16 is valid ONLY for nnTransform3D "
+                        "chroma_net v2 (the ÷128-scale weights) and makes it "
+                        "ANE-eligible; every other supported model needs fp32 "
+                        "(v1-series chroma_net overflows, ldzeug2 index math breaks)")
     p.add_argument("--height", type=int, default=263,
                    help="ldzeug2 input height = decoder modelHeight; the package "
                         "ONLY runs at this exact shape (color_cnn is field mode → "

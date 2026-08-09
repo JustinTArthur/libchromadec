@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include <chromadec/enum.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -15,7 +17,7 @@ typedef struct chd_frame    chd_frame_t;
 typedef struct chd_nn_model chd_nn_model_t;
 typedef struct chd_cancel   chd_cancel_t;
 
-typedef enum chd_video_standard {
+typedef CHD_ENUM(chd_video_standard) {
     CHD_STD_UNKNOWN = 0,
     CHD_STD_NTSC,
     CHD_STD_PAL,
@@ -24,7 +26,7 @@ typedef enum chd_video_standard {
     CHD_STD_SECAM   = 8
 } chd_video_standard_t;
 
-typedef enum chd_sample_encoding {
+typedef CHD_ENUM(chd_sample_encoding) {
     CHD_ENC_UNKNOWN = 0,
     CHD_ENC_CVBS_U10_4FSC,
     CHD_ENC_CVBS_U16_4FSC,
@@ -34,7 +36,7 @@ typedef enum chd_sample_encoding {
     CHD_ENC_RAW_S16_40M
 } chd_sample_encoding_t;
 
-typedef enum chd_signal_state {
+typedef CHD_ENUM(chd_signal_state) {
     CHD_SIG_UNKNOWN = 0,
     CHD_SIG_STANDARD_TBC_LOCKED,
     CHD_SIG_STANDARD_TBC_UNLOCKED,
@@ -44,13 +46,13 @@ typedef enum chd_signal_state {
     CHD_SIG_NONSTANDARD_RAW
 } chd_signal_state_t;
 
-typedef enum chd_frame_layout {
+typedef CHD_ENUM(chd_frame_layout) {
     CHD_FRAME_LAYOUT_UNKNOWN = 0,
     CHD_FRAME_LAYOUT_FIELD_RASTER,
     CHD_FRAME_LAYOUT_FRAME_NATIVE
 } chd_frame_layout_t;
 
-typedef enum chd_plane {
+typedef CHD_ENUM(chd_plane) {
     CHD_PLANE_Y  = 0,
     CHD_PLANE_CB = 1,
     CHD_PLANE_CR = 2,
@@ -59,7 +61,7 @@ typedef enum chd_plane {
     CHD_PLANE_B  = 5
 } chd_plane_t;
 
-typedef enum chd_pixel_format {
+typedef CHD_ENUM(chd_pixel_format) {
     CHD_PIXEL_YUV444P16 = 0,
     CHD_PIXEL_YUV444PS  = 1,
     CHD_PIXEL_RGB48     = 2,
@@ -73,7 +75,7 @@ typedef enum chd_pixel_format {
     CHD_PIXEL_YUV440PS  = 9
 } chd_pixel_format_t;
 
-typedef enum chd_clamp {
+typedef CHD_ENUM(chd_clamp) {
     CHD_CLAMP_NONE               = 0,
     CHD_CLAMP_LEGAL_RGB_SDR      = 1,
     CHD_CLAMP_LEGAL_RGB_HDR      = 2,
@@ -143,13 +145,13 @@ typedef struct chd_plane_info {
 
 /* Colour-difference component carried by one frame row of a
  * line-sequential (SECAM) decode. */
-typedef enum chd_chroma_row_component {
+typedef CHD_ENUM(chd_chroma_row_component) {
     CHD_CHROMA_ROW_DB = 0,
     CHD_CHROMA_ROW_DR = 1
 } chd_chroma_row_component_t;
 
 /* How per-line Db/Dr identity was decided for a frame. */
-typedef enum chd_chroma_ident_mechanism {
+typedef CHD_ENUM(chd_chroma_ident_mechanism) {
     CHD_CHROMA_IDENT_PORCH   = 0,
     CHD_CHROMA_IDENT_BOTTLES = 1,
     CHD_CHROMA_IDENT_CONTENT = 2,

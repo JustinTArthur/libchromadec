@@ -52,6 +52,14 @@ Any new public function must:
 3. Have its rationale and lifetime rules documented in the header.
 4. Pass the CI ABI-checker against the previous release tag.
 
+## Enum representation
+
+Every public enum is declared through `CHD_ENUM` (see the
+[API reference](api-reference.md#enums)): a fixed `int32_t` underlying type in
+C++ and C23, a plain enum with the identical 4-byte representation in older C.
+Size, alignment and calling convention are the same in every language mode, so
+adding enumerators to an existing enum is ABI-safe within a minor version.
+
 ## Extending option structs
 
 Caller-populated option structs (`chd_nn_session_opts_t`, `chd_dropout_opts_t`)

@@ -2,11 +2,13 @@
 #ifndef CHROMADEC_ERRORS_H
 #define CHROMADEC_ERRORS_H
 
+#include <chromadec/enum.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum chd_status {
+typedef CHD_ENUM(chd_status) {
     CHD_OK                         = 0,
     CHD_E_INVALID_ARG              = 1,
     CHD_E_FILE_NOT_FOUND           = 2,

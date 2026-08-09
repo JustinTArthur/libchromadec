@@ -355,26 +355,45 @@ jobs:
   # the repo lands on GitHub (vcpkg/meson/pkg-config/MSVC environment
   # interactions can't be fully validated locally on macOS/Linux).
   #
-  # Both legs run natively, so each one tests what it builds. Cross-compiling
+  # Every leg runs natively, so each one tests what it builds. Cross-compiling
   # arm64 from an x64 runner would need a meson cross file and would leave the
   # arm64 suite unrun, which is the part most likely to break.
   windows:
-    name: windows-${{ matrix.arch }}
+    name: windows-${{ matrix.label }}
     needs: fixtures
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: x64
+            label: x64
             runner: windows-2025
             triplet: x64-windows
             ort_arch: x64
+            ort_source: release
           - arch: arm64
+            label: arm64
             runner: windows-11-arm
             triplet: arm64-windows
             # Microsoft ships no -gpu- variant for Windows arm64; the plain
             # archive is the only one published for this arch.
             ort_arch: arm64
+            ort_source: release
+          # DirectML is the one Windows execution provider with no hardware
+          # requirement a CI runner can't meet in software, and the only one
+          # whose attach path is compiled behind a header the CPU archives do
+          # not ship: without a leg built against the DirectML package,
+          # src/nn/provider_select.cpp's DirectML code is never compiled at all.
+          # This leg builds it and asserts the provider is really there. It does
+          # not pin the provider for the suite, because whether a GitHub runner's
+          # software adapter can carry an actual DirectML attach is unproven; the
+          # step that tries is allowed to fail.
+          - arch: x64
+            label: x64-directml
+            runner: windows-2025
+            triplet: x64-windows
+            ort_arch: x64
+            ort_source: nuget-directml
     runs-on: ${{ matrix.runner }}
     env:
       # Pinned rather than taken from the image: the x64 runner ships a vcpkg
@@ -442,6 +461,7 @@ jobs:
           "$env:GITHUB_WORKSPACE\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Download ONNX Runtime (Microsoft release, Windows ${{ matrix.arch }} CPU)
+        if: matrix.ort_source == 'release'
         shell: pwsh
         run: |
           $ORT_VER = "1.27.1"
@@ -450,6 +470,37 @@ jobs:
           $ortDir = (Get-ChildItem "$env:USERPROFILE\ort_extract" | Where-Object PSIsContainer | Select-Object -First 1).FullName
           "ORT_ROOT=$ortDir" | Out-File -FilePath $env:GITHUB_ENV -Append
           "$ortDir\lib" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      # DirectML ONNX Runtime is published only as a NuGet package, never as a
+      # release archive, so this leg feeds the build a package directory rather
+      # than an unpacked archive. -Donnxruntime_root understands that layout
+      # (runtimes/<rid>/native + build/native/include) directly; pointing at the
+      # package unmodified is deliberate, since hand-assembling a lib/+include/
+      # root is exactly the step this is meant to spare consumers.
+      #
+      # DirectML.dll itself is not in the ONNX Runtime package. It comes from
+      # Microsoft.AI.DirectML, which NuGet restores as a dependency, and it has
+      # to sit beside onnxruntime.dll for the delay-load to resolve, so it is
+      # copied into the package's own native directory.
+      - name: Install ONNX Runtime (NuGet DirectML, Windows ${{ matrix.arch }})
+        if: matrix.ort_source == 'nuget-directml'
+        shell: pwsh
+        run: |
+          $ORT_VER = "1.27.1"
+          if (-not (Get-Command nuget -ErrorAction SilentlyContinue)) {
+            Invoke-WebRequest "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "$env:GITHUB_WORKSPACE\nuget.exe"
+            $env:PATH = "$env:GITHUB_WORKSPACE;$env:PATH"
+          }
+          nuget install Microsoft.ML.OnnxRuntime.DirectML -Version $ORT_VER -OutputDirectory nuget
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $pkg = Get-ChildItem nuget -Directory -Filter "Microsoft.ML.OnnxRuntime.DirectML*" | Select-Object -First 1
+          $dml = Get-ChildItem nuget -Directory -Filter "Microsoft.AI.DirectML*" | Select-Object -First 1
+          if (-not $pkg) { Write-Error "Microsoft.ML.OnnxRuntime.DirectML was not restored"; exit 1 }
+          if (-not $dml) { Write-Error "Microsoft.AI.DirectML was not restored; DirectML.dll would be missing"; exit 1 }
+          $native = "$($pkg.FullName)\runtimes\win-${{ matrix.ort_arch }}\native"
+          Copy-Item "$($dml.FullName)\bin\${{ matrix.ort_arch }}-win\DirectML.dll" $native
+          "ORT_ROOT=$($pkg.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$native" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       # force-fallback-for=sqlite3 states outright what dropping the vcpkg port
       # would otherwise leave to chance: take the bundled amalgamation, whatever
@@ -475,7 +526,27 @@ jobs:
         shell: pwsh
         env:
           CHD_ENCODE_ORC_FIXTURE_DIR: ${{ github.workspace }}/fixtures
+          # 15 = CHD_NN_ORT_DIRECTML. Empty on the CPU legs, which the NN suite
+          # reads as "no provider to require". This asserts the linked package
+          # really carries the provider this leg was built for, so picking up a
+          # CPU-only ONNX Runtime by accident fails instead of passing quietly.
+          CHD_TEST_REQUIRE_ORT_PROVIDER: ${{ matrix.ort_source == 'nuget-directml' && '15' || '' }}
         run: meson test -C build --print-errorlogs
+
+      # Whether a GitHub runner's software D3D12 adapter can carry a DirectML
+      # attach is unproven, and worth learning, so pin the provider and let the
+      # answer be informational. Pinning is all or nothing — a provider that
+      # fails to attach is CHD_E_NN_BACKEND_UNAVAILABLE, not a silent CPU
+      # fallback — so a red step here means this runner has no usable adapter,
+      # not that the DirectML path is broken.
+      - name: Probe a real DirectML attach (informational)
+        if: matrix.ort_source == 'nuget-directml'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          CHD_TEST_NN_BACKEND: '15'
+          CHD_TEST_EXPECT_NN_BACKEND: '15'
+        run: meson test -C build --print-errorlogs nn_framework nntransform3d ldzeug
 
       - name: Verify exported chd_* symbols
         shell: pwsh

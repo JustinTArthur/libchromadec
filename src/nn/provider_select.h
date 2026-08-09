@@ -65,7 +65,8 @@ bool providerIsAvailable(ProviderPreference provider);
 // on success.
 //
 // `cache` is consulted by EPs that support persistent caching (TRT,
-// MIGraphX). EPs that don't ignore it.
+// MIGraphX). EPs that don't ignore it. `precision` is consulted by EPs
+// with a reduced-precision engine mode (TRT); the rest ignore it.
 //
 // The CPU provider is appended implicitly (ORT's default), so a chain that
 // reaches it always succeeds — but `outAttached` is set to CHD_NN_ORT_CPU.
@@ -76,6 +77,7 @@ bool providerIsAvailable(ProviderPreference provider);
 bool attachProviderChain(Ort::SessionOptions &options,
                          const std::vector<ProviderPreference> &chain,
                          const EngineCacheConfig &cache,
+                         chd_nn_compute_precision_t precision,
                          ProviderPreference *outAttached,
                          std::string *outError);
 
@@ -88,17 +90,20 @@ bool attachCoreML(Ort::SessionOptions &options, std::string *outError);
 bool attachDirectML(Ort::SessionOptions &options, std::string *outError);
 bool attachTensorRT(Ort::SessionOptions &options,
                     const EngineCacheConfig &cache,
+                    chd_nn_compute_precision_t precision,
                     std::string *outError);
 bool attachMIGraphX(Ort::SessionOptions &options,
                     const EngineCacheConfig &cache,
                     std::string *outError);
 
-// Pin the MIGraphX provider library, the ONNX Runtime core it is bound to,
-// and through their dependency graph the MIGraphX/ROCm stack, into the
-// process for the rest of its lifetime. Call after a session has been created
-// with the MIGraphX EP attached; both libraries are guaranteed loaded by
-// then. No-op off Linux and when no provider library is loaded. Idempotent.
-void pinMIGraphXProviderLibrary();
+// Pin the dlopen'd libraries of the execution provider a session actually
+// attached (CUDA, TensorRT, or MIGraphX — the ones ORT loads dynamically and
+// dlcloses at env teardown), plus the ONNX Runtime core they are bound to,
+// into the process for the rest of its lifetime. Call after a session has
+// been created with that EP attached; the libraries are guaranteed loaded by
+// then. No-op off Linux, for providers without a dlopen'd library, and for
+// libraries this process never loaded. Idempotent per library.
+void pinProviderLibraries(chd_nn_backend_t provider);
 
 }  // namespace chd::nn
 

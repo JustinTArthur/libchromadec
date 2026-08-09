@@ -14,7 +14,6 @@
 #ifndef CHD_NN_ORT_ENV_H
 #define CHD_NN_ORT_ENV_H
 
-#include <memory>
 #include <mutex>
 
 #include <onnxruntime_cxx_api.h>
@@ -41,9 +40,8 @@ public:
     OrtEnvSingleton() = delete;
 
 private:
-    static std::once_flag onceFlag_;
-    static std::unique_ptr<Ort::Env> env_;
-    static std::mutex shutdownMutex_;
+    static Ort::Env  *env_;   // leaked unless chd_shutdown() runs; see .cpp
+    static std::mutex envMutex_;
 };
 
 }  // namespace chd::nn

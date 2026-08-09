@@ -90,15 +90,12 @@ void setSink(chd_log_fn fn_or_null, void *user_data) {
 void installStderrSink() { setSink(stderrSink, nullptr); }
 
 void setMinLevel(Level level) {
-    // The entry point takes an enum but a C caller can hand over any integer,
+    // The entry point takes an enum but a caller can hand over any int32_t,
     // so clamp to a defined threshold rather than store a value that would
-    // make every later comparison meaningless. Widened first: the enum has no
-    // negative enumerator, so its underlying type may be unsigned and the
-    // lower bound would otherwise be a comparison that is always false.
-    const long long widened = static_cast<long long>(level);
-    if (widened < CHD_LOG_DEBUG) {
+    // make every later comparison meaningless.
+    if (level < CHD_LOG_DEBUG) {
         level = CHD_LOG_DEBUG;
-    } else if (widened > CHD_LOG_OFF) {
+    } else if (level > CHD_LOG_OFF) {
         level = CHD_LOG_OFF;
     }
     g_min_level.store(level, std::memory_order_relaxed);

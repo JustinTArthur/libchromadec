@@ -2,13 +2,15 @@
 #ifndef CHROMADEC_LOG_H
 #define CHROMADEC_LOG_H
 
+#include <chromadec/enum.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* Diagnostic severities. CHD_LOG_OFF is a threshold value only and is never
  * passed to a sink. */
-typedef enum chd_log_level {
+typedef CHD_ENUM(chd_log_level) {
     CHD_LOG_DEBUG = 0,
     CHD_LOG_INFO  = 1,
     CHD_LOG_WARN  = 2,

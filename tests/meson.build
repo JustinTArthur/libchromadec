@@ -33,6 +33,15 @@ abi_smoke = executable('abi_smoke',
   dependencies: chromadec_abi_dep)
 test('abi_smoke', abi_smoke)
 
+# The same TU under C23, where CHD_ENUM expands to fixed underlying types in C
+# as well. The std list falls back to c11 on compilers without C23 support, so
+# this duplicates abi_smoke there instead of failing setup.
+abi_smoke_c23 = executable('abi_smoke_c23',
+  'unit/abi_smoke.c',
+  override_options: {'c_std': 'c23,c11'},
+  dependencies: chromadec_abi_dep)
+test('abi_smoke_c23', abi_smoke_c23)
+
 test_tbc_reader = executable('test_tbc_reader',
   'unit/test_tbc_reader.cpp',
   dependencies: [chromadec_abi_dep, sqlite3_dep])
@@ -215,11 +224,21 @@ nn_fixture_arg = '-DCHD_TEST_FIXTURE_DIR="' + (meson.current_source_dir() / 'fix
 # ask for, it returns a null OrtApi that faults on first use. The executable's
 # own directory is the one place searched before System32, so the DLLs have to
 # live there. No-op off Windows, where the runtime is resolved by rpath.
+#
+# The execution providers travel with it. ORT reaches its own provider DLLs
+# relative to the onnxruntime.dll that loaded, and DirectML.dll is delay-loaded
+# by name, so a package built against a GPU-carrying ONNX Runtime would
+# otherwise test a runtime whose providers are all missing and quietly report
+# nothing but CPU. Whichever of these the linked package has get copied.
 ort_test_runtime = []
-if host_machine.system() == 'windows' and has_ort and ort_root != ''
+if host_machine.system() == 'windows' and has_ort and ort_dll_dir != ''
   fs = import('fs')
-  foreach dll : ['onnxruntime.dll', 'onnxruntime_providers_shared.dll']
-    dll_src = ort_root / 'lib' / dll
+  foreach dll : ['onnxruntime.dll',
+                 'onnxruntime_providers_shared.dll',
+                 'onnxruntime_providers_cuda.dll',
+                 'onnxruntime_providers_tensorrt.dll',
+                 'DirectML.dll']
+    dll_src = ort_dll_dir / dll
     if fs.exists(dll_src)
       ort_test_runtime += fs.copyfile(dll_src, dll)
     endif

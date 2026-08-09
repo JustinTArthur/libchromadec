@@ -36,10 +36,12 @@ project('chromadec', 'cpp', 'c',
 cpp = meson.get_compiler('cpp')
 cc  = meson.get_compiler('c')
 
-# MSVC's <cmath> hides M_PI and the other POSIX math constants behind
-# _USE_MATH_DEFINES; the decoders rely on M_PI throughout. Define it project-wide
-# so every translation unit sees the constants, rather than guarding each file.
-if cpp.get_id() == 'msvc'
+# The Microsoft CRT's <cmath> hides M_PI and the other POSIX math constants
+# behind _USE_MATH_DEFINES; the decoders rely on M_PI throughout. Define it
+# project-wide so every translation unit sees the constants, rather than guarding
+# each file. The test is on argument syntax, not compiler id: clang-cl needs
+# this too.
+if cpp.get_argument_syntax() == 'msvc'
   add_project_arguments('-D_USE_MATH_DEFINES', language: ['c', 'cpp'])
 endif
 
@@ -82,20 +84,54 @@ fftw3_dep   = dependency('fftw3',   required: false)
 # installed the build would link that instead and ignore the root entirely,
 # producing a library bound to a path the consumer does not have and to whatever
 # version and provider set that copy happens to carry.
-ort_root = get_option('onnxruntime_root')
-ort_dep  = dependency('', required: false)
+#
+# Two on-disk layouts are accepted, because Microsoft publishes both. The
+# release archives put the library in lib/ beside include/. The NuGet packages
+# split them into runtimes/<rid>/native and build/native/include, and that is
+# the only form the DirectML-carrying Windows package is published in, so a
+# consumer who wants that execution provider has no archive to point at.
+ort_root    = get_option('onnxruntime_root')
+ort_dep     = dependency('', required: false)
+ort_dll_dir = ''
+ort_incdirs = []
 if get_option('with_onnxruntime') and ort_root != ''
-  ort_lib = cpp.find_library('onnxruntime',
-                             dirs: [ort_root / 'lib'],
-                             required: false)
-  if ort_lib.found()
-    ort_dep = declare_dependency(
-      dependencies: ort_lib,
-      include_directories: include_directories(ort_root / 'include'))
-  else
-    warning('onnxruntime_root=' + ort_root + ' has no linkable onnxruntime ' +
-            'library under lib/; falling back to pkg-config and CMake discovery')
+  fs = import('fs')
+  nuget_rid = host_machine.cpu_family() == 'aarch64' ? 'win-arm64' : 'win-x64'
+  ort_libdirs = []
+  foreach candidate : [[ort_root / 'lib', ort_root / 'include'],
+                       [ort_root / 'runtimes' / nuget_rid / 'native',
+                        ort_root / 'build' / 'native' / 'include']]
+    if fs.is_dir(candidate[0])
+      ort_libdirs += candidate[0]
+    endif
+    if fs.is_dir(candidate[1])
+      ort_incdirs += candidate[1]
+    endif
+  endforeach
+
+  ort_lib = dependency('', required: false)
+  if ort_libdirs.length() > 0
+    ort_lib = cpp.find_library('onnxruntime', dirs: ort_libdirs, required: false)
   endif
+  # A root the caller named but the build cannot use is fatal rather than a
+  # warning: falling through to pkg-config and CMake discovery would quietly
+  # link whatever other ONNX Runtime the machine happens to carry, which is the
+  # copy the caller was explicitly steering away from, and with a different
+  # execution-provider set than the one they chose the root for.
+  if not ort_lib.found() or ort_incdirs.length() == 0
+    error('onnxruntime_root=' + ort_root + ' is not a usable ONNX Runtime root. ' +
+          'Expected the release-archive layout (lib/ + include/) or the NuGet ' +
+          'package layout (runtimes/' + nuget_rid + '/native + ' +
+          'build/native/include). Pass a different root, drop the option to ' +
+          'discover ORT via pkg-config or CMake, or set -Dwith_onnxruntime=false.')
+  endif
+  ort_dep = declare_dependency(
+    dependencies: ort_lib,
+    include_directories: include_directories(ort_incdirs))
+  # Where the runtime DLLs sit, for the Windows tests: the loader searches the
+  # running executable's own directory ahead of System32, so they get copied
+  # beside the test binaries (see tests/meson.build).
+  ort_dll_dir = ort_libdirs[0]
 endif
 if not ort_dep.found()
   ort_dep = dependency('libonnxruntime', required: false)
@@ -263,9 +299,10 @@ endif
 # pkg-config has no portable way to query a library's link language, so emit the
 # stdlib into Libs.private ourselves. Detect the one actually in use by probing
 # its version macro (honours a forced -stdlib=): _LIBCPP_VERSION means libc++,
-# otherwise assume libstdc++. MSVC links its runtime implicitly, so emit nothing.
+# otherwise assume libstdc++. A compiler driving the MSVC runtime (cl.exe or
+# clang-cl) links it implicitly through #pragma comment(lib), so emit nothing.
 cxx_runtime_libs = []
-if cpp.get_id() != 'msvc'
+if cpp.get_argument_syntax() != 'msvc'
   if cpp.get_define('_LIBCPP_VERSION', prefix: '#include <utility>') != ''
     cxx_runtime_libs = ['-lc++']
   else

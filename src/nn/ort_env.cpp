@@ -41,28 +41,32 @@ std::unique_ptr<Ort::Env> makeEnv()
 
 }  // namespace
 
-std::once_flag                 OrtEnvSingleton::onceFlag_;
-std::unique_ptr<Ort::Env>      OrtEnvSingleton::env_;
-std::mutex                     OrtEnvSingleton::shutdownMutex_;
+// A raw pointer, deliberately never deleted at static-destruction time. If
+// the env were destroyed from a static destructor, its teardown
+// (UnloadSharedProviders -> dlclose of the GPU provider libraries) would run
+// inside _dl_fini, interleaved with the CUDA/TensorRT runtimes' own exit
+// handlers — the CUDA driver then frees against a corrupted heap and the
+// process aborts after main returns, with correct output already written.
+// Leaking the env keeps ORT and its providers untouched during _dl_fini;
+// chd_shutdown() remains the deterministic teardown for callers that want
+// one, and running it before exit is proven safe.
+Ort::Env  *OrtEnvSingleton::env_ = nullptr;
+std::mutex OrtEnvSingleton::envMutex_;
 
 Ort::Env &OrtEnvSingleton::get()
 {
-    std::call_once(onceFlag_, []() { env_ = makeEnv(); });
+    std::lock_guard<std::mutex> lock(envMutex_);
     if (env_ == nullptr) {
-        // Re-construct after a prior shutdown(). Protected by the mutex so
-        // concurrent get() calls don't race on env_ assignment.
-        std::lock_guard<std::mutex> lock(shutdownMutex_);
-        if (env_ == nullptr) {
-            env_ = makeEnv();
-        }
+        env_ = makeEnv().release();
     }
     return *env_;
 }
 
 void OrtEnvSingleton::shutdown()
 {
-    std::lock_guard<std::mutex> lock(shutdownMutex_);
-    env_.reset();
+    std::lock_guard<std::mutex> lock(envMutex_);
+    delete env_;
+    env_ = nullptr;
 }
 
 }  // namespace chd::nn
