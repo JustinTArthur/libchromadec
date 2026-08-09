@@ -482,19 +482,29 @@ jobs:
       # Microsoft.AI.DirectML, which NuGet restores as a dependency, and it has
       # to sit beside onnxruntime.dll for the delay-load to resolve, so it is
       # copied into the package's own native directory.
+      #
+      # The version is pinned separately from the release-archive legs:
+      # DirectML builds of ONNX Runtime end at 1.24.4 on every channel
+      # Microsoft ships them through, NuGet and the PyPI wheel alike (newer
+      # Windows work went into Windows ML instead), so the release-archive
+      # version does not exist here. The leg compiles against the package's
+      # own bundled headers, so the two version streams never mix.
       - name: Install ONNX Runtime (NuGet DirectML, Windows ${{ matrix.arch }})
         if: matrix.ort_source == 'nuget-directml'
         shell: pwsh
         run: |
-          $ORT_VER = "1.27.1"
+          $ORT_VER = "1.24.4"
           if (-not (Get-Command nuget -ErrorAction SilentlyContinue)) {
             Invoke-WebRequest "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "$env:GITHUB_WORKSPACE\nuget.exe"
             $env:PATH = "$env:GITHUB_WORKSPACE;$env:PATH"
           }
-          nuget install Microsoft.ML.OnnxRuntime.DirectML -Version $ORT_VER -OutputDirectory nuget
+          # Outside the workspace: Meson rejects include paths that resolve
+          # inside the source tree.
+          $nugetDir = "$env:USERPROFILE\nuget"
+          nuget install Microsoft.ML.OnnxRuntime.DirectML -Version $ORT_VER -OutputDirectory $nugetDir
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $pkg = Get-ChildItem nuget -Directory -Filter "Microsoft.ML.OnnxRuntime.DirectML*" | Select-Object -First 1
-          $dml = Get-ChildItem nuget -Directory -Filter "Microsoft.AI.DirectML*" | Select-Object -First 1
+          $pkg = Get-ChildItem $nugetDir -Directory -Filter "Microsoft.ML.OnnxRuntime.DirectML*" | Select-Object -First 1
+          $dml = Get-ChildItem $nugetDir -Directory -Filter "Microsoft.AI.DirectML*" | Select-Object -First 1
           if (-not $pkg) { Write-Error "Microsoft.ML.OnnxRuntime.DirectML was not restored"; exit 1 }
           if (-not $dml) { Write-Error "Microsoft.AI.DirectML was not restored; DirectML.dll would be missing"; exit 1 }
           $native = "$($pkg.FullName)\runtimes\win-${{ matrix.ort_arch }}\native"

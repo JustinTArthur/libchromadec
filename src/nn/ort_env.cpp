@@ -4,6 +4,12 @@
 
 #include <stdexcept>
 
+#if defined(__linux__)
+#include <dlfcn.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include "../common/log.h"
 
 namespace chd::nn {
@@ -39,6 +45,32 @@ std::unique_ptr<Ort::Env> makeEnv()
                                       ortLogSink, nullptr);
 }
 
+// Pin the module containing this library's code into the process for its
+// remaining lifetime, so a host that unloads the library (plugin frameworks
+// do, from their own exit handlers) cannot unmap it. Once an env exists,
+// process-lifetime state points into this module and its dependency chain:
+// the deliberately leaked env itself, exit handlers registered inside the
+// ONNX Runtime this module links, and the CUDA runtime's registrations when
+// the GPU pipeline is built in. Unmapping any of it turns process exit into
+// a jump through a dangling handler into unmapped code. Pinning the module
+// holds its dependencies with it, and a handle-based unload becomes a
+// refcount drop that never unmaps.
+void pinSelfModule()
+{
+#if defined(__linux__)
+    Dl_info info{};
+    if (dladdr(reinterpret_cast<void *>(&pinSelfModule), &info) != 0 &&
+        info.dli_fname != nullptr) {
+        dlopen(info.dli_fname, RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
+    }
+#elif defined(_WIN32)
+    HMODULE mod = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN |
+                           GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                       reinterpret_cast<LPCWSTR>(&pinSelfModule), &mod);
+#endif
+}
+
 }  // namespace
 
 // A raw pointer, deliberately never deleted at static-destruction time. If
@@ -57,6 +89,7 @@ Ort::Env &OrtEnvSingleton::get()
 {
     std::lock_guard<std::mutex> lock(envMutex_);
     if (env_ == nullptr) {
+        pinSelfModule();
         env_ = makeEnv().release();
     }
     return *env_;

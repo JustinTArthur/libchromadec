@@ -151,7 +151,11 @@ set:
 
 No published Windows package carries both CUDA and DirectML, so the auto chain
 a build can actually reach is bounded by the package it linked. Pick the
-package for the provider you intend to ship.
+package for the provider you intend to ship. The two also run on different
+version streams: DirectML builds of ONNX Runtime end at 1.24.4 on every
+channel Microsoft ships them through, the NuGet package and the PyPI
+`onnxruntime-directml` wheel alike (newer Windows work went into Windows ML
+instead), while the release archives continue past it.
 
 !!! warning "Bundlers: what not to touch"
     Tools that vendor a binary's dependencies (delvewheel, PyInstaller and the
