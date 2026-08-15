@@ -3,7 +3,7 @@
 site_name = "libchromadec"
 site_description = "A shared library for decoding 4×fsc-sampled composite analog video (CVBS / TBC) into component Y'CbCr output."
 site_author = "Justin Turner Arthur"
-#site_url = "https://www.example.com/"
+site_url = "https://chroma-decode.justinarthur.com/"
 
 copyright = """
 Copyright &copy; 2026 the libchromadec authors. Licensed GPL-3.0-or-later.

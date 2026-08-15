@@ -11,7 +11,6 @@
  * confirms the symbol survived into the shared object's export list.
  */
 
-#include <chromadec/calibration.h>
 #include <chromadec/decoder.h>
 #include <chromadec/dropout.h>
 #include <chromadec/errors.h>
@@ -34,7 +33,6 @@
 typedef void (*chd_abi_fn)(void);
 
 static chd_abi_fn const kExports[] = {
-    (chd_abi_fn)chd_chroma_sideband_calibrate, /* calibration.h */
     (chd_abi_fn)chd_decoder_free,              /* decoder.h     */
     (chd_abi_fn)chd_dropout_spans_free,        /* dropout.h     */
     (chd_abi_fn)chd_status_str,                /* errors.h      */

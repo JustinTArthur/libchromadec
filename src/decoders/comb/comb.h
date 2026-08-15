@@ -48,36 +48,10 @@ namespace chd::nn { class InferenceEngine; }
 
 namespace chd::decoders::comb {
 
-class BetaAccumulator;
-
 class Comb
 {
 public:
     Comb();
-
-    // Reconstruction applied to the demodulated chroma. The first three are
-    // "equiband" in the SMPTE ST 170 Annex A.4 sense — equal bandwidth on both
-    // axes — differing only in cutoff; the WidebandI* modes are the NTSC-1953
-    // unequal (wide-I/narrow-Q) split.
-    //   EquibandWide ~2.2 MHz low-pass on both axes (the unchanged
-    //   ld-chroma-decoder default; passes everything below fSC)
-    //   Equiband13   1.3 MHz low-pass on both axes (SMPTE ST 170 / ITU-R BT.1700 U/V)
-    //   ColorUnder   ~0.5 MHz low-pass on both axes, matching the surviving
-    //                bandwidth of VHS/S-VHS colour-under chroma (IEC 60774-1 §6.2)
-    //   WidebandI    1.3 MHz on I, 0.6 MHz on Q (NTSC-1953 asymmetric split).
-    //                Internal only — no ABI string maps to it; retained as the
-    //                non-reconstructing baseline the WidebandISSB unit test
-    //                measures against. Not a recommended decode for any source
-    //                (WidebandISSB dominates it on the I axis).
-    //   WidebandISSB WidebandI plus single-sideband reconstruction: the
-    //                0.6-1.3 MHz wideband-I detail NTSC-1953 transmits
-    //                lower-sideband-only is restored to full amplitude by
-    //                Hilbert-transforming its crosstalk off the Q axis
-    // The I/Q-asymmetric modes are only meaningful on the burst-locked I/Q
-    // axes, so they require phaseCompensation; without it filterIQ falls back
-    // to Equiband13. The equiband modes (EquibandWide/Equiband13/ColorUnder)
-    // are rotation-invariant and need no phase compensation.
-    enum class ChromaFilterMode { EquibandWide, Equiband13, ColorUnder, WidebandI, WidebandISSB };
 
     // Comb filter configuration parameters
     struct Configuration {
@@ -92,7 +66,6 @@ public:
         bool adaptive = true;
         bool showMap = false;
         bool phaseCompensation = false;
-        ChromaFilterMode chromaFilterMode = ChromaFilterMode::EquibandWide;
 
         double cNRLevel = 0.0;
         double yNRLevel = 0.0;
@@ -109,25 +82,6 @@ public:
         // constant (1.0 for the original chroma_net, 128.0 for v2).
         bool nnTransform3D = false;
         double nnInputMagnitudeScale = 1.0;
-
-        // Calibration pass: when set, decodeFrames feeds the burst-locked
-        // demodulated I/Q planes to the accumulator and skips reconstruction
-        // (output frames are left undecoded). Only meaningful with
-        // phaseCompensation. Non-owning; caller keeps it alive.
-        BetaAccumulator *betaAccumulator = nullptr;
-
-        // Measured NTSC-1953 sideband-asymmetry profile (from
-        // chd_chroma_sideband_calibrate or a preset). plateau > 0 enables the
-        // WidebandISSB transition-band corrections; updateConfiguration
-        // synthesizes the correction taps below from these parameters.
-        // plateau == 0 (the default) is exactly today's behaviour.
-        double ssbBetaPlateau = 0.0;
-        double ssbBetaEdgeCenterHz = 0.0;
-        double ssbBetaEdgeWidthHz = 0.0;
-
-        // Derived by updateConfiguration — not caller-set.
-        std::vector<double> ssbIEqTaps;
-        std::vector<double> ssbQNullTaps;
 
         int32_t getLookBehind() const;
         int32_t getLookAhead() const;

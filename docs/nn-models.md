@@ -54,10 +54,12 @@ and tries a platform-specific EP chain, using the first that loads:
 A chain only reaches the providers the linked ONNX Runtime was built with. On
 Windows that is a packaging choice rather than a hardware one: the release
 archives carry CPU alone (`onnxruntime-win-<arch>`) or CUDA plus TensorRT
-(`onnxruntime-win-x64-gpu`), while DirectML is published only as the
-`Microsoft.ML.OnnxRuntime.DirectML` NuGet package, and none of them carries
-both CUDA and DirectML. `-Donnxruntime_root=` takes either layout, the
-archive's `lib/` plus `include/` or the NuGet package directory as restored.
+(`onnxruntime-win-x64-gpu`), while DirectML is published only through NuGet:
+the `Microsoft.ML.OnnxRuntime.DirectML` package, frozen at 1.24.4, or the
+Windows ML package (`Microsoft.Windows.AI.MachineLearning`), which keeps moving
+and bundles `DirectML.dll` in-box. None of them carries both CUDA and DirectML.
+`-Donnxruntime_root=` takes any of the three layouts, the archive's `lib/` plus
+`include/` or either NuGet package directory as restored.
 See [shipping on Windows](integration-guide.md#shipping-on-windows) for which
 DLLs then have to travel with your binary.
 

@@ -12,7 +12,6 @@
 #include <chromadec/frame.h>
 #include <chromadec/nn.h>
 #include <chromadec/dropout.h>
-#include <chromadec/calibration.h>
 #include <chromadec/pipeline.h>
 
 #endif

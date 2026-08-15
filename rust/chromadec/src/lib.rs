@@ -55,8 +55,6 @@ pub mod options {
     pub const COMB_ADAPT_THRESHOLD: &str = "comb_adapt_threshold"; // f64, NTSC 3D
     pub const COMB_CHROMA_WEIGHT: &str = "comb_chroma_weight"; // f64, NTSC 3D
     pub const COMB_SHOW_MAP: &str = "comb_show_map"; // bool, NTSC 3D
-    pub const CHROMA_FILTER: &str = "chroma_filter"; // str
-    pub const CHROMA_UPPER_SIDEBAND_HZ: &str = "chroma_upper_sideband_hz"; // f64, equiband_vsb only
     pub const CHROMA_IDENT_MODE: &str = "chroma_ident_mode"; // str, SECAM
     pub const CHROMA_IDENT_MANUAL: &str = "chroma_ident_manual"; // str, SECAM manual mode
     pub const CHROMA_CLICK_NR_LEVEL: &str = "chroma_click_nr_level"; // f64, SECAM

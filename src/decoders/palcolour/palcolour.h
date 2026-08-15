@@ -35,7 +35,6 @@
 #include "../../metadata/core.h"
 
 #include "../../output/component_frame.h"
-#include "../chroma_filter.h"
 #include "../../common/color_conversion.h"
 #include "../decoder_base.h"
 #include "../source_field.h"
@@ -49,8 +48,6 @@ public:
     PalColour();
 
     // Specify which method to use to separate luma and chroma information.
-    // (This is the separation *algorithm*; the chroma *bandwidth* is a
-    // separate setting, carried by chromaBandwidthHz below.)
     enum SeparationMethod {
         // PALColour's 2D FIR filter
         palColourFilter = 0,
@@ -73,22 +70,6 @@ public:
         double yNRLevel = 0.0;
         bool simplePAL = false;
         SeparationMethod separation = palColourFilter;
-
-        // Resolved chroma low-pass cutoff (-6 dB corner) for the PALcolour 2D
-        // raised-cosine filter, in Hz. The default is the legacy 1.1/0.93
-        // dot-pattern-tuned value (compat); the chroma_filter option resolves
-        // equiband (1.3 MHz) / color_under (~0.5 MHz) to their own cutoffs.
-        double chromaBandwidthHz = chd::decoders::kCompatPalChromaHz;
-
-        // equiband_vsb: recover the vestigial (lower-sideband-only) chroma
-        // between chromaUpperSidebandHz and the equiband ceiling to full
-        // amplitude by an EQ shelf. Off (false) leaves a plain symmetric
-        // raised-cosine filter at chromaBandwidthHz. chromaUpperSidebandHz is
-        // the upper-sideband room +X above the subcarrier where the channel
-        // clipped the upper sideband (e.g. 1066000 for System-I PAL).
-        bool chromaVsbRecovery = false;
-        double chromaUpperSidebandHz = 0.0;
-
         double transformThreshold = 0.4;
         std::vector<double> transformThresholds;
         bool showFFTs = false;
@@ -154,20 +135,12 @@ private:
     // filterSize is the highest tap index carrying a nonzero coefficient: the
     // raised cosine reaches its first zero at the kernel half-width
     // ca = 0.5 * sampleRate / chromaBandwidthHz, so floor(ca) spans the whole
-    // nonzero kernel. buildLookUpTables derives it from the resolved chroma
-    // cutoff and the sample rate, so narrower chroma bandwidths (which need a
-    // wider kernel) and higher sample rates size the tables up automatically
+    // nonzero kernel. buildLookUpTables derives it from the chroma cutoff and
+    // the sample rate, so higher sample rates size the tables up automatically
     // rather than overflowing a fixed ceiling.
     int32_t filterSize = 0;
     std::vector<std::array<double, 4>> cfilt;
     std::vector<std::array<double, 2>> yfilt;
-
-    // equiband_vsb: linear-phase EQ kernel that restores the half-amplitude
-    // droop of the vestigial (lower-sideband-only) chroma band. Empty unless
-    // chromaVsbRecovery is set; synthesized in buildLookUpTables from the
-    // upper-sideband room +X and the equiband cutoff. Applied per line to the
-    // recovered U and V in decodeField.
-    std::vector<double> vsbEqTaps;
 };
 
 }  // namespace chd::decoders::palcolour

@@ -10,8 +10,8 @@
 //
 // One ISource interface, three concrete implementations:
 //   - TbcSource             — ld-decode `.tbc` + sqlite/json sidecar
-//   - CvbsCompositeSource   — CVBS spec `.composite` + `.meta` sqlite sidecar
-//   - CvbsYcSource          — CVBS spec dual-file `.y` + `.c` + `.meta`
+//   - CvbsCompositeSource   — CVBS spec `.cvbs` + `.meta` sqlite sidecar
+//   - CvbsYcSource          — CVBS spec dual-file `.cvbsy` + `.cvbsc` + `.meta`
 //
 // The signal-state and sample-encoding accessors let decoders refuse
 // incompatible inputs (raw-uncorrected signals) and let the I/O layer

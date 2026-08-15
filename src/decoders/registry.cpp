@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-#include "chroma_filter.h"
 #include "comb/comb.h"
 #include "comb/ntsc_decoder.h"
 #include "mono/mono_decoder.h"
@@ -149,12 +148,6 @@ bool optionApplies(chd_decoder_kind_t kind, const std::string &name, OptionType 
     if (type == OptionType::F64 && name == CHD_OPT_CHROMA_CLICK_ENV_DIP_DB)     return secam;
     if (type == OptionType::F64 && name == CHD_OPT_CHROMA_CLICK_FREQ_OVERSHOOT) return secam;
 
-    // Cross-system chroma-filter intent + numeric upper-sideband geometry.
-    // Both apply to the comb (NTSC) and PalColour (PAL/PAL-M) decoders;
-    // commit resolves the (mode, system) cell and rejects invalid ones.
-    if (type == OptionType::Str  && name == CHD_OPT_CHROMA_FILTER)           return comb || pal;
-    if (type == OptionType::F64  && name == CHD_OPT_CHROMA_UPPER_SIDEBAND_HZ) return comb || pal;
-
     // Transform-PAL options.
     if (type == OptionType::F64 && name == CHD_OPT_TRANSFORM_THRESHOLD)
         return kind == CHD_DEC_TRANSFORM_2D || kind == CHD_DEC_TRANSFORM_3D;
@@ -169,29 +162,7 @@ bool optionApplies(chd_decoder_kind_t kind, const std::string &name, OptionType 
     return false;
 }
 
-bool isNtscCombKind(chd_decoder_kind_t kind) {
-    return isCombKind(kind) || kind == CHD_DEC_AUTO;
-}
-
 namespace {
-
-// Map a cross-system chroma-filter intent to the NTSC comb's internal filter
-// selector. The (mode, system) validity is checked at commit, so only the
-// NTSC-valid intents reach here; anything else degrades to the comb's loose
-// legacy default (EquibandWide), which is also what compat resolves to on NTSC.
-chd::decoders::comb::Comb::ChromaFilterMode combModeFor(chd::decoders::ChromaFilter f) {
-    using CombMode = chd::decoders::comb::Comb::ChromaFilterMode;
-    switch (f) {
-        case chd::decoders::ChromaFilter::Equiband:     return CombMode::Equiband13;
-        case chd::decoders::ChromaFilter::ColorUnder:   return CombMode::ColorUnder;
-        case chd::decoders::ChromaFilter::WidebandISSB: return CombMode::WidebandISSB;
-        case chd::decoders::ChromaFilter::Compat:
-        case chd::decoders::ChromaFilter::EquibandWide:
-        case chd::decoders::ChromaFilter::EquibandVsb:
-            break;
-    }
-    return CombMode::EquibandWide;
-}
 
 void fillCombConfig(chd::decoders::comb::Comb::Configuration &c, const OptionMaps &o,
                     chd_decoder_kind_t kind) {
@@ -204,28 +175,7 @@ void fillCombConfig(chd::decoders::comb::Comb::Configuration &c, const OptionMap
     c.showMap    = findOr(o.boolean, CHD_OPT_COMB_SHOW_MAP, c.showMap);
     c.phaseCompensation = findOr(o.boolean, CHD_OPT_PHASE_COMPENSATION, c.phaseCompensation);
 
-    const auto intent = chd::decoders::parseChromaFilter(
-        findOr(o.str, CHD_OPT_CHROMA_FILTER, std::string{}))
-        .value_or(chd::decoders::ChromaFilter::Compat);
-    c.chromaFilterMode = combModeFor(intent);
     c.colorConversion = colorConversionFor(o);
-    // The asymmetric wide-I/narrow-Q reconstruction is only defined on the
-    // burst-locked I/Q axes, so wideband_i_ssb implies phase compensation unless
-    // the caller explicitly turned it off (in which case filterIQ degrades to
-    // equiband).
-    if (c.chromaFilterMode == chd::decoders::comb::Comb::ChromaFilterMode::WidebandISSB
-        && o.boolean.find(CHD_OPT_PHASE_COMPENSATION) == o.boolean.end()) {
-        c.phaseCompensation = true;
-    }
-
-    // β profile: only an actively-classified profile drives the SSB
-    // corrections — an unclassified one (DSB source, or untrusted estimate)
-    // is inert, so the output converges on the profile-less behaviour.
-    if (o.sidebandCalib && o.sidebandCalib->is_wideband_i != 0 && o.sidebandCalib->beta_plateau > 0.0) {
-        c.ssbBetaPlateau      = o.sidebandCalib->beta_plateau;
-        c.ssbBetaEdgeCenterHz = o.sidebandCalib->edge_center_hz;
-        c.ssbBetaEdgeWidthHz  = o.sidebandCalib->edge_width_hz;
-    }
 
     // Dimensionality and adaptivity are determined by the decoder kind. There
     // are no separate options.
@@ -257,16 +207,6 @@ void fillPalConfig(chd::decoders::palcolour::PalColour::Configuration &c, const 
         c.transformThresholds = readTransformThresholds(thresholdsFile);
     }
 
-    // Chroma-filter intent → PALcolour 2D raised-cosine cutoff. The cutoffs are
-    // system-independent across PAL/PAL-M, and commit already validated the
-    // (mode, system) cell, so resolving against PAL here is sufficient.
-    const auto intent = chd::decoders::parseChromaFilter(
-        findOr(o.str, CHD_OPT_CHROMA_FILTER, std::string{}))
-        .value_or(chd::decoders::ChromaFilter::Compat);
-    const auto res = chd::decoders::resolveChromaFilter(intent, chd::metadata::PAL);
-    c.chromaBandwidthHz     = res.cutoffHz;
-    c.chromaVsbRecovery     = (intent == chd::decoders::ChromaFilter::EquibandVsb);
-    c.chromaUpperSidebandHz = findOr(o.f64, CHD_OPT_CHROMA_UPPER_SIDEBAND_HZ, 0.0);
     c.colorConversion = colorConversionFor(o);
 
     switch (kind) {

@@ -194,7 +194,7 @@ chd_sample_encoding_t toAbiEncoding(chd::format::SampleEncoding encoding) {
         case chd::format::SampleEncoding::CVBS_U10_4FSC:   return CHD_ENC_CVBS_U10_4FSC;
         case chd::format::SampleEncoding::CVBS_U16_4FSC:   return CHD_ENC_CVBS_U16_4FSC;
         case chd::format::SampleEncoding::CVBS_TPG21_4FSC: return CHD_ENC_CVBS_TPG21_4FSC;
-        case chd::format::SampleEncoding::CVBS_S16_FSC:    return CHD_ENC_CVBS_S16_FSC;
+        case chd::format::SampleEncoding::CVBS_S16_4FSC:   return CHD_ENC_CVBS_S16_4FSC;
         case chd::format::SampleEncoding::RAW_S16_28M:     return CHD_ENC_RAW_S16_28M;
         case chd::format::SampleEncoding::RAW_S16_40M:     return CHD_ENC_RAW_S16_40M;
     }
@@ -257,8 +257,10 @@ bool isCvbsSidecar(const std::string &path) {
 }
 
 // Strip extension and append ".meta" for sidecar auto-location. The CVBS
-// spec's file naming convention pairs `<basename>.composite` (or
-// `<basename>.y` + `<basename>.c`) with `<basename>.meta`.
+// spec's file naming convention pairs `<basename>.cvbs` (or
+// `<basename>.cvbsy` + `<basename>.cvbsc`) with `<basename>.meta`. Stripping
+// whatever extension is present also covers the pre-v1.5.0 `.composite`,
+// `.y` and `.c` names.
 std::string defaultMetaPath(const std::string &dataPath) {
     const fs::path p(dataPath);
     fs::path stem = p;
@@ -393,7 +395,7 @@ chd_status_t resolveCvbsParams(const std::string &dataPath,
         case CHD_ENC_CVBS_U10_4FSC:   encoding = chd::format::SampleEncoding::CVBS_U10_4FSC;   break;
         case CHD_ENC_CVBS_U16_4FSC:   encoding = chd::format::SampleEncoding::CVBS_U16_4FSC;   break;
         case CHD_ENC_CVBS_TPG21_4FSC: encoding = chd::format::SampleEncoding::CVBS_TPG21_4FSC; break;
-        case CHD_ENC_CVBS_S16_FSC:    encoding = chd::format::SampleEncoding::CVBS_S16_FSC;    break;
+        case CHD_ENC_CVBS_S16_4FSC:   encoding = chd::format::SampleEncoding::CVBS_S16_4FSC;   break;
         case CHD_ENC_RAW_S16_28M:     encoding = chd::format::SampleEncoding::RAW_S16_28M;     break;
         case CHD_ENC_RAW_S16_40M:     encoding = chd::format::SampleEncoding::RAW_S16_40M;     break;
         default:
@@ -428,7 +430,7 @@ struct OpenedSource {
     bool metadataSynthesized = false;
 };
 
-// Open a single composite source (ld-decode `.tbc` or CVBS `.composite`),
+// Open a single composite source (ld-decode `.tbc` or CVBS `.cvbs`),
 // auto-detecting the sidecar flavour. `fn` is the caller name for error
 // prefixes; `path` must already exist (callers check).
 chd_status_t openCompositeSource(const std::string &fn, const std::string &path,
@@ -578,9 +580,9 @@ chd_status_t chd_video_open_yc(const char *luma_path, const char *chroma_path,
     }
 
     const SidecarResolution sc = resolveSidecarFlavour(luma_path, metadata_path_or_null);
-    // A CVBS `.y`/`.c` pair (a `.meta` sidecar, or no sidecar + override) reads
+    // A CVBS `.cvbsy`/`.cvbsc` pair (a `.meta` sidecar, or no sidecar + override) reads
     // through a single CvbsYcSource that reconstructs a composite from the
-    // centred-chroma `.c`. A vhs-decode luma.tbc + chroma.tbc pair instead
+    // centred-chroma `.cvbsc`. A vhs-decode luma.tbc + chroma.tbc pair instead
     // decodes each plane separately and merges (set up below).
     const bool decodeMerge = sc.found && !sc.isCvbs;
 
@@ -841,7 +843,7 @@ chd_status_t chd_video_add_extra_source_yc(chd_video_t *v, const char *luma_path
             chroma_path, chromaSidecar);
     }
 
-    // CVBS `.y`/`.c` pair: one CvbsYcSource extra, matching the primary.
+    // CVBS `.cvbsy`/`.cvbsc` pair: one CvbsYcSource extra, matching the primary.
     ResolvedCvbsParams resolved{};
     const chd_status_t rc = resolveCvbsParams(
         luma_path, sc.found ? sc.path.c_str() : nullptr, nullptr, &resolved);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // CvbsCompositeSource — ISource implementation for the CVBS file format
-// specification's `<basename>.composite` layout (single file containing
+// specification's `<basename>.cvbs` layout (single file containing
 // luma+chroma combined into one signal).
 //
 // On open the source pairs the on-disk binary with a Video Standard Preset,

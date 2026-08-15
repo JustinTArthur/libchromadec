@@ -384,7 +384,7 @@ int testSyncDecodeBlackMono(const fs::path &dir) {
 // v->metadata == nullptr. Hardening synthesizes metadata at open time and
 // drops the check.
 int testCvbsPrimaryWithTbcExtra(const fs::path &dir) {
-    const std::string composite  = (dir / "cvbs.composite").string();
+    const std::string composite  = (dir / "cvbs.cvbs").string();
     const std::string compositeM = (dir / "cvbs.meta").string();
     const std::string extraTbc   = (dir / "extra.tbc").string();
     const std::string extraDb    = (dir / "extra.tbc.db").string();
@@ -1453,7 +1453,7 @@ int testSignalLineConversion(const fs::path &dir) {
 // sidecar marks the capture subcarrier-locked (blanking-start rows), putting
 // ST 244 sample 0 at row sample 142 and the digital active line 0..767 at
 // 142..909; with the lock flag cleared the raster is line-locked (sync-start
-// rows) and the same region lands at 125..892. A sidecar-less PAL .composite
+// rows) and the same region lands at 125..892. A sidecar-less PAL .cvbs
 // covers the 625-line constants (177 sync-start, 187 blanking-start).
 int testStandardSampleConversion(const fs::path &dir) {
     constexpr int32_t fieldWidth  = 910;
@@ -1516,9 +1516,9 @@ int testStandardSampleConversion(const fs::path &dir) {
         fs::remove(sidecar);
     }
 
-    // 625-line constants, both alignments, via a sidecar-less PAL .composite.
+    // 625-line constants, both alignments, via a sidecar-less PAL .cvbs.
     for (int32_t scLocked = 0; scLocked <= 1; scLocked++) {
-        const std::string composite = (dir / "stdsamp_pal.composite").string();
+        const std::string composite = (dir / "stdsamp_pal.cvbs").string();
         REQUIRE(writeUniformTbc(composite, 1135, 313, numFields, 16384));
 
         chd_video_params_t params{};

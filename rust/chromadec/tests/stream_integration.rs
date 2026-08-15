@@ -45,7 +45,7 @@ sections:
     duration: 3
     source:
       type: "yuv422-image"
-      file: "${ENCODE_ORC_ASSETS}/ntsc-raw/525_5994_75_BARS.raw"
+      file: "${ENCODE_ORC_ASSETS}/720x480/stills/raw/75_BARS.raw"
 "#;
 
 /// A generated fixture; deletes its temp dir on drop.
@@ -73,6 +73,9 @@ fn generate_ntsc_fixture() -> Option<Fixture> {
     );
     // Assets live in the sibling `assets/` of the binary's grandparent
     // ($repo/build/encode-orc -> $repo/assets), overridable for odd layouts.
+    // The subpath in the YAML follows encode-orc's resolution-first asset
+    // layout; a checkout predating that reorganisation needs the override
+    // pointed at a directory laid out to match.
     let assets = match std::env::var_os("CHD_ENCODE_ORC_ASSETS") {
         Some(a) => PathBuf::from(a),
         None => encode_orc

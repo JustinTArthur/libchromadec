@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // CvbsYcSource — ISource implementation for the CVBS file format
-// specification's dual-file YC layout (`<basename>.y` + `<basename>.c`).
+// specification's dual-file YC layout (`<basename>.cvbsy` + `<basename>.cvbsc`).
 //
-// The .y file follows the same level definitions as the composite output;
-// the .c file uses a centred 10-bit representation with chroma zero at
+// The .cvbsy file follows the same level definitions as the composite output;
+// the .cvbsc file uses a centred 10-bit representation with chroma zero at
 // sample value 512 (spec: sample-encoding-presets.md). On read this source
 // synthesises a composite-shaped sample:
 //

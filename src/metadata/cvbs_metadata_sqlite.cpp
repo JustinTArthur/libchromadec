@@ -28,8 +28,11 @@ std::optional<CvbsMetadata> readCvbsMetadata(const std::string &metaPath)
         return std::nullopt;
     }
 
-    // Confirm the schema's user_version is one the reader implements: 7, or
-    // 8 (which added the CVBS_S16_FSC encoding and the audio_locked column).
+    // Confirm the schema's user_version is one the reader implements. The
+    // `cvbs_file` columns we select are identical across 7..10; the bumps in
+    // that range moved audio metadata around (8 added `audio_locked`, 9
+    // replaced it with a per-track table, 10 recast that as
+    // `audio_channel_pair` on SMPTE 272M), which this reader does not touch.
     int userVersion = -1;
     {
         sqlite3_stmt *vstmt = nullptr;
@@ -39,10 +42,10 @@ std::optional<CvbsMetadata> readCvbsMetadata(const std::string &metaPath)
         }
         if (vstmt != nullptr) sqlite3_finalize(vstmt);
     }
-    if (userVersion != 7 && userVersion != 8) {
+    if (userVersion < 7 || userVersion > 10) {
         chd::detail::set_last_error(
             "CVBS metadata: user_version = " + std::to_string(userVersion) +
-            " (expected 7 or 8) in " + metaPath);
+            " (expected 7 to 10) in " + metaPath);
         return std::nullopt;
     }
 

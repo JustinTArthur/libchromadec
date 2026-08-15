@@ -54,6 +54,18 @@ jobs:
       - name: Set up encode-orc (drives the stream integration fixture)
         uses: ./.github/actions/setup-encode-orc
 
+      # The stream integration test names its bars still by encode-orc's
+      # current resolution-first asset layout, which the pinned encode-orc
+      # commit predates. Lay the one asset it needs out in that shape and hand
+      # it over through the override the test already honours.
+      - name: Lay out encode-orc's assets in their current shape
+        run: |
+          shim="${HOME}/encode-orc-assets"
+          mkdir -p "${shim}/720x480/stills/raw"
+          ln -sfn "$(dirname "$(dirname "${CHD_ENCODE_ORC}")")/assets/ntsc-raw/525_5994_75_BARS.raw" \
+            "${shim}/720x480/stills/raw/75_BARS.raw"
+          echo "CHD_ENCODE_ORC_ASSETS=${shim}" >> "$GITHUB_ENV"
+
       - name: rustfmt
         working-directory: rust
         run: cargo fmt --check

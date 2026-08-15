@@ -68,13 +68,11 @@ chd_status_t chd_decoder_get_output_info(const chd_decoder_t *d, chd_output_info
 #define CHD_OPT_COMB_ADAPT_THRESHOLD        "comb_adapt_threshold"      /* f64, NTSC 3D */
 #define CHD_OPT_COMB_CHROMA_WEIGHT          "comb_chroma_weight"        /* f64, NTSC 3D */
 #define CHD_OPT_COMB_SHOW_MAP               "comb_show_map"             /* bool, NTSC 3D */
-#define CHD_OPT_CHROMA_FILTER               "chroma_filter"             /* str: "compat"|"equiband_wide"|"equiband"|"color_under"|"wideband_i_ssb"|"equiband_vsb" */
 #define CHD_OPT_CHROMA_IDENT_MODE           "chroma_ident_mode"         /* str: "auto"|"porch"|"bottles"|"manual", SECAM */
 #define CHD_OPT_CHROMA_IDENT_MANUAL         "chroma_ident_manual"       /* str: "db_first"|"dr_first"; required iff mode is "manual" */
 #define CHD_OPT_CHROMA_CLICK_NR_LEVEL       "chroma_click_nr_level"     /* f64 0.0-1.0, default 1.0, SECAM FM click concealment (0.0 = off) */
 #define CHD_OPT_CHROMA_CLICK_ENV_DIP_DB     "chroma_click_env_dip_db"   /* f64 dB, absolute override of the adaptive envelope-dip threshold */
 #define CHD_OPT_CHROMA_CLICK_FREQ_OVERSHOOT "chroma_click_freq_overshoot" /* f64 multiples of the max-deviation bound, absolute override */
-#define CHD_OPT_CHROMA_UPPER_SIDEBAND_HZ    "chroma_upper_sideband_hz"  /* f64, equiband_vsb only: upper-sideband room +X above fSC */
 #define CHD_OPT_TRANSFORM_THRESHOLD         "transform_threshold"       /* f64 */
 #define CHD_OPT_TRANSFORM_THRESHOLDS_FILE   "transform_thresholds_file" /* str */
 #define CHD_OPT_FIRST_ACTIVE_SAMPLE         "first_active_sample"       /* i32, inclusive, 0-indexed */

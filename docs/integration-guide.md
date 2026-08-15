@@ -146,16 +146,17 @@ set:
 | Provider | Ships as | Where it comes from |
 |---|---|---|
 | CPU | built into `onnxruntime.dll` | any package |
-| DirectML | `DirectML.dll`, delay-loaded by name | `Microsoft.AI.DirectML`, restored as a dependency of the `Microsoft.ML.OnnxRuntime.DirectML` NuGet package, not in the ONNX Runtime package itself |
+| DirectML | `DirectML.dll`, delay-loaded by name | bundled in the Windows ML package's `runtimes/<rid>/native`; with the classic `Microsoft.ML.OnnxRuntime.DirectML` package it comes from `Microsoft.AI.DirectML`, restored as a dependency, not from the ONNX Runtime package itself |
 | CUDA / TensorRT | `onnxruntime_providers_cuda.dll`, `onnxruntime_providers_tensorrt.dll`, `onnxruntime_providers_shared.dll` | the `onnxruntime-win-x64-gpu` release archive; the CUDA and TensorRT runtimes themselves are the user's to install |
 
 No published Windows package carries both CUDA and DirectML, so the auto chain
 a build can actually reach is bounded by the package it linked. Pick the
 package for the provider you intend to ship. The two also run on different
-version streams: DirectML builds of ONNX Runtime end at 1.24.4 on every
-channel Microsoft ships them through, the NuGet package and the PyPI
-`onnxruntime-directml` wheel alike (newer Windows work went into Windows ML
-instead), while the release archives continue past it.
+version streams: the classic DirectML builds of ONNX Runtime end at 1.24.4,
+the `Microsoft.ML.OnnxRuntime.DirectML` NuGet package and the PyPI
+`onnxruntime-directml` wheel alike, and newer DirectML-capable runtimes ship
+only inside the Windows ML package, while the release archives continue on
+their own cadence.
 
 !!! warning "Bundlers: what not to touch"
     Tools that vendor a binary's dependencies (delvewheel, PyInstaller and the
@@ -314,9 +315,9 @@ int main(void) {
 ## Opening other source types
 
 [`chd_video_open_composite`](api-reference.md#chd_video_open_composite) opens a
-single-file composite (an ld-decode `.tbc` or a CVBS `.composite`).
+single-file composite (an ld-decode `.tbc` or a CVBS `.cvbs`).
 [`chd_video_open_yc`](api-reference.md#chd_video_open_yc) opens a dual-file Y/C
-pair (luma + chroma `.tbc`, or CVBS `.y` + `.c`). Both accept an optional
+pair (luma + chroma `.tbc`, or CVBS `.cvbsy` + `.cvbsc`). Both accept an optional
 [`chd_video_params_t`](api-reference.md#chd_video_params_t) override for when
 metadata is absent or you need to force parameters.
 
@@ -331,8 +332,8 @@ the matching open function and metadata sidecar file from the
 | ld-decode / vhs-decode / encode-orc composite `.tbc`        | `.tbc.db` / `.tbc.json`              | none (pass `NULL`)                                                                                      |
 | vhs-decode luma + chroma `.tbc` pair                        | shared `.tbc.json`, or one per plane | none (pass `NULL`)                                                                                      |
 | ld-chroma-encoder `.tbc` (line-locked or `--sc-locked` PAL) | `.tbc.db` / `.tbc.json`              | none (the sidecar carries the subcarrier lock)                                                          |
-| CVBS field raster with `.meta` (`.composite` or `.y`/`.c`)  | `.meta`                              | none, or `is_subcarrier_locked = 1` for a subcarrier-locked (blanking-start) raster                     |
-| CVBS frame native with `.meta` (`.composite` or `.y`/`.c`)  | `.meta`                              | none, or `layout = CHD_FRAME_LAYOUT_FRAME_NATIVE` at the ambiguous sizes noted below                    |
+| CVBS field raster with `.meta` (`.cvbs` or `.cvbsy`/`.cvbsc`) | `.meta`                            | none, or `is_subcarrier_locked = 1` for a subcarrier-locked (blanking-start) raster                     |
+| CVBS frame native with `.meta` (`.cvbs` or `.cvbsy`/`.cvbsc`) | `.meta`                            | none, or `layout = CHD_FRAME_LAYOUT_FRAME_NATIVE` at the ambiguous sizes noted below                    |
 | CVBS without `.meta` (any layout)                           | none                                 | `standard`, `encoding`, `signal_state` (all required), plus `layout` / `is_subcarrier_locked` as needed |
 
 Two rules govern the table. With a sidecar present, only `layout`,

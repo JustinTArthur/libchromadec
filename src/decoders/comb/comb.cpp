@@ -28,8 +28,6 @@
 
 #include "comb.h"
 
-#include "beta_calibration.h"
-
 #include "../ntsc_burst.h"
 
 #include "../../output/frame_canvas.h"
@@ -172,22 +170,6 @@ bool Comb::updateConfiguration(const chd::metadata::LdDecodeMetaData::VideoParam
         chd::log::warn() << "Data is not in 4fsc sample rate, color decoding will not work properly!";
     }
 
-    // Synthesize the β-profile correction taps for the SSB reconstruction.
-    // An absent/inactive profile leaves the vectors empty and filterIQ
-    // behaves exactly as if no profile existed (β ≡ 0).
-    configuration.ssbIEqTaps.clear();
-    configuration.ssbQNullTaps.clear();
-    if (configuration.ssbBetaPlateau > 0.0
-        && configuration.chromaFilterMode == ChromaFilterMode::WidebandISSB
-        && configuration.phaseCompensation) {
-        auto taps = synthesizeSsbCorrections(configuration.ssbBetaPlateau,
-                                             configuration.ssbBetaEdgeCenterHz,
-                                             configuration.ssbBetaEdgeWidthHz,
-                                             videoParameters.sampleRate);
-        configuration.ssbIEqTaps = std::move(taps.iEq);
-        configuration.ssbQNullTaps = std::move(taps.qNull);
-    }
-
     configurationSet = true;
     return true;
 }
@@ -328,15 +310,6 @@ void Comb::decodeFrames(const std::vector<chd::decoders::SourceField> &inputFiel
             // Extract Y from baseband and I/Q
             currentFrameBuffer->adjustY();
         }
-
-        // Calibration pass: measure the unfiltered demodulated planes and
-        // skip reconstruction (filterIQ would low-pass away the >0.6 MHz
-        // Q-axis crosstalk the measurement exists to observe).
-        if (configuration.betaAccumulator != nullptr) {
-            configuration.betaAccumulator->accumulateFrame(componentFrames[frameIndex], videoParameters);
-            continue;
-        }
-
         currentFrameBuffer->filterIQ();
 
         // Apply noise reduction
@@ -751,119 +724,23 @@ void Comb::FrameBuffer::splitIQ()
 // Filter the IQ from the component frame
 void Comb::FrameBuffer::filterIQ()
 {
+    auto iqFilter = chd::decoders::filter::makeFIRFilter(chd::decoders::filter::c_colorlp_b);
+
     // Temporary output buffer for the filter
     const int width = videoParameters.activeVideoEnd - videoParameters.activeVideoStart;
     std::vector<double> tempBuf(width);
 
-    // Run iCoeffs on the I (u) plane and qCoeffs on the Q (v) plane. For the
-    // symmetric modes the same array is passed for both; a symmetric low-pass
-    // is rotation-invariant, so it is axis-safe whether splitIQ left the planes
-    // on the U/V grid or splitIQlocked rotated them onto the I/Q axes.
-    const auto runFilters = [&](const auto &iCoeffs, const auto &qCoeffs) {
-        auto iFilter = chd::decoders::filter::makeFIRFilter(iCoeffs);
-        auto qFilter = chd::decoders::filter::makeFIRFilter(qCoeffs);
-        for (int32_t lineNumber = videoParameters.firstActiveFrameLine; lineNumber <= videoParameters.lastActiveFrameLine; lineNumber++) {
-            double *I = componentFrame->u(lineNumber) + videoParameters.activeVideoStart;
-            double *Q = componentFrame->v(lineNumber) + videoParameters.activeVideoStart;
+    for (int32_t lineNumber = videoParameters.firstActiveFrameLine; lineNumber <= videoParameters.lastActiveFrameLine; lineNumber++) {
+        double *I = componentFrame->u(lineNumber) + videoParameters.activeVideoStart;
+        double *Q = componentFrame->v(lineNumber) + videoParameters.activeVideoStart;
 
-            iFilter.apply(I, tempBuf.data(), width);
-            std::copy(tempBuf.begin(), tempBuf.end(), I);
+        // Apply filter to I
+        iqFilter.apply(I, tempBuf.data(), width);
+        std::copy(tempBuf.begin(), tempBuf.end(), I);
 
-            qFilter.apply(Q, tempBuf.data(), width);
-            std::copy(tempBuf.begin(), tempBuf.end(), Q);
-        }
-    };
-
-    namespace filter = chd::decoders::filter;
-    switch (configuration.chromaFilterMode) {
-        case ChromaFilterMode::Equiband13:
-            runFilters(filter::c_colorlp13_b, filter::c_colorlp13_b);
-            break;
-        case ChromaFilterMode::ColorUnder:
-            // VHS/S-VHS colour-under chroma survives only as symmetric ~0.5 MHz
-            // DSB; match that bandwidth on both axes. Symmetric, so rotation-
-            // invariant — no burst-locked axes / phase compensation needed.
-            runFilters(filter::c_colorlp05_b, filter::c_colorlp05_b);
-            break;
-        case ChromaFilterMode::WidebandI:
-            // The asymmetric split only makes sense once the chroma vector has
-            // been rotated onto the true I/Q axes (splitIQlocked). Without
-            // phase compensation the planes are still on the U/V grid, where a
-            // wide-I/narrow-Q filter would clip the wrong axis, so degrade to
-            // the symmetric 1.3 MHz equiband response instead.
-            if (configuration.phaseCompensation) {
-                runFilters(filter::c_colorlp13_b, filter::c_colorlp06_b);
-            } else {
-                runFilters(filter::c_colorlp13_b, filter::c_colorlp13_b);
-            }
-            break;
-        case ChromaFilterMode::WidebandISSB:
-            // NTSC-1953 transmits wideband I above ~0.6 MHz lower-sideband
-            // only. Synchronous demodulation recovers an SSB component at half
-            // amplitude on I and spills the other half onto Q as its Hilbert
-            // transform; in that band the real Q is zero by construction
-            // (Q is bandlimited to 0.6 MHz), so Hilbert-transforming the
-            // ~0.6-1.3 MHz region of the Q plane and subtracting it from I
-            // restores full-amplitude wideband I. Like WidebandI this is only
-            // defined on the burst-locked I/Q axes.
-            //
-            // Both planes are first equalized against the split1D chroma
-            // prefilter's known droop; the crosstalk in Q passed through the
-            // same prefilter as I, so the EQ ahead of the cross-feed corrects
-            // all three filter paths at once.
-            if (configuration.phaseCompensation) {
-                auto eFilter = chd::decoders::filter::makeFIRFilter(filter::c_colorpfeq_b);
-                auto iFilter = chd::decoders::filter::makeFIRFilter(filter::c_colorlp13_b);
-                auto qFilter = chd::decoders::filter::makeFIRFilter(filter::c_colorlp06_b);
-                auto hFilter = chd::decoders::filter::makeFIRFilter(filter::c_colorhilb_b);
-                // β-profile corrections (taps synthesized by
-                // updateConfiguration; empty = β ≡ 0 = no-ops).
-                const bool haveBeta = !configuration.ssbIEqTaps.empty()
-                                      && !configuration.ssbQNullTaps.empty();
-                auto cFilter = chd::decoders::filter::makeFIRFilter(configuration.ssbIEqTaps);
-                auto nFilter = chd::decoders::filter::makeFIRFilter(configuration.ssbQNullTaps);
-                std::vector<double> tempI(width), tempH(width);
-                for (int32_t lineNumber = videoParameters.firstActiveFrameLine; lineNumber <= videoParameters.lastActiveFrameLine; lineNumber++) {
-                    double *I = componentFrame->u(lineNumber) + videoParameters.activeVideoStart;
-                    double *Q = componentFrame->v(lineNumber) + videoParameters.activeVideoStart;
-
-                    eFilter.apply(I, tempBuf.data(), width);
-                    std::copy(tempBuf.begin(), tempBuf.end(), I);
-                    eFilter.apply(Q, tempBuf.data(), width);
-                    std::copy(tempBuf.begin(), tempBuf.end(), Q);
-
-                    // The cross-feed must read the un-nulled Q: above the
-                    // skirt the Q plane *is* the crosstalk being recovered.
-                    hFilter.apply(Q, tempH.data(), width);
-
-                    if (haveBeta) {
-                        // Null the I-detail crosstalk out of Q (β·ĥ of the
-                        // clean I observation), then equalize the I direct
-                        // path through the vestigial transition strip.
-                        nFilter.apply(I, tempBuf.data(), width);
-                        for (int32_t h = 0; h < width; h++) {
-                            Q[h] -= tempBuf[h];
-                        }
-                        cFilter.apply(I, tempBuf.data(), width);
-                        std::copy(tempBuf.begin(), tempBuf.end(), I);
-                    }
-
-                    iFilter.apply(I, tempI.data(), width);
-                    qFilter.apply(Q, tempBuf.data(), width);
-
-                    for (int32_t h = 0; h < width; h++) {
-                        I[h] = tempI[h] - tempH[h];
-                    }
-                    std::copy(tempBuf.begin(), tempBuf.end(), Q);
-                }
-            } else {
-                runFilters(filter::c_colorlp13_b, filter::c_colorlp13_b);
-            }
-            break;
-        case ChromaFilterMode::EquibandWide:
-        default:
-            runFilters(filter::c_colorlp_b, filter::c_colorlp_b);
-            break;
+        // Apply filter to Q
+        iqFilter.apply(Q, tempBuf.data(), width);
+        std::copy(tempBuf.begin(), tempBuf.end(), Q);
     }
 }
 

@@ -94,7 +94,7 @@ pub enum SampleEncoding {
     CvbsU10_4fsc,
     CvbsU16_4fsc,
     CvbsTpg21_4fsc,
-    CvbsS16Fsc,
+    CvbsS16_4fsc,
     RawS16_28m,
     RawS16_40m,
 }
@@ -106,7 +106,7 @@ impl SampleEncoding {
             SampleEncoding::CvbsU10_4fsc => sys::chd_sample_encoding::CHD_ENC_CVBS_U10_4FSC,
             SampleEncoding::CvbsU16_4fsc => sys::chd_sample_encoding::CHD_ENC_CVBS_U16_4FSC,
             SampleEncoding::CvbsTpg21_4fsc => sys::chd_sample_encoding::CHD_ENC_CVBS_TPG21_4FSC,
-            SampleEncoding::CvbsS16Fsc => sys::chd_sample_encoding::CHD_ENC_CVBS_S16_FSC,
+            SampleEncoding::CvbsS16_4fsc => sys::chd_sample_encoding::CHD_ENC_CVBS_S16_4FSC,
             SampleEncoding::RawS16_28m => sys::chd_sample_encoding::CHD_ENC_RAW_S16_28M,
             SampleEncoding::RawS16_40m => sys::chd_sample_encoding::CHD_ENC_RAW_S16_40M,
         }
@@ -117,7 +117,7 @@ impl SampleEncoding {
             sys::chd_sample_encoding::CHD_ENC_CVBS_U10_4FSC => SampleEncoding::CvbsU10_4fsc,
             sys::chd_sample_encoding::CHD_ENC_CVBS_U16_4FSC => SampleEncoding::CvbsU16_4fsc,
             sys::chd_sample_encoding::CHD_ENC_CVBS_TPG21_4FSC => SampleEncoding::CvbsTpg21_4fsc,
-            sys::chd_sample_encoding::CHD_ENC_CVBS_S16_FSC => SampleEncoding::CvbsS16Fsc,
+            sys::chd_sample_encoding::CHD_ENC_CVBS_S16_4FSC => SampleEncoding::CvbsS16_4fsc,
             sys::chd_sample_encoding::CHD_ENC_RAW_S16_28M => SampleEncoding::RawS16_28m,
             sys::chd_sample_encoding::CHD_ENC_RAW_S16_40M => SampleEncoding::RawS16_40m,
             _ => SampleEncoding::Unknown,

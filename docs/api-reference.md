@@ -448,7 +448,7 @@ typedef struct chd_cancel   chd_cancel_t;
 | Enum | Values |
 |---|---|
 | `chd_video_standard_t` | `CHD_STD_UNKNOWN`, `CHD_STD_NTSC`, `CHD_STD_PAL`, `CHD_STD_PAL_M`, `CHD_STD_SECAM` |
-| `chd_sample_encoding_t` | `CHD_ENC_UNKNOWN`, `CHD_ENC_CVBS_U10_4FSC`, `CHD_ENC_CVBS_U16_4FSC`, `CHD_ENC_CVBS_TPG21_4FSC`, `CHD_ENC_CVBS_S16_FSC`, `CHD_ENC_RAW_S16_28M`, `CHD_ENC_RAW_S16_40M` |
+| `chd_sample_encoding_t` | `CHD_ENC_UNKNOWN`, `CHD_ENC_CVBS_U10_4FSC`, `CHD_ENC_CVBS_U16_4FSC`, `CHD_ENC_CVBS_TPG21_4FSC`, `CHD_ENC_CVBS_S16_4FSC`, `CHD_ENC_RAW_S16_28M`, `CHD_ENC_RAW_S16_40M` |
 | `chd_signal_state_t` | `CHD_SIG_UNKNOWN`, `CHD_SIG_STANDARD_TBC_LOCKED`, `CHD_SIG_STANDARD_TBC_UNLOCKED`, `CHD_SIG_STANDARD_RAW`, `CHD_SIG_NONSTANDARD_TBC_LOCKED`, `CHD_SIG_NONSTANDARD_TBC_UNLOCKED`, `CHD_SIG_NONSTANDARD_RAW` |
 | `chd_frame_layout_t` | `CHD_FRAME_LAYOUT_UNKNOWN`, `CHD_FRAME_LAYOUT_FIELD_RASTER`, `CHD_FRAME_LAYOUT_FRAME_NATIVE` |
 | `chd_plane_t` | `CHD_PLANE_Y`, `CHD_PLANE_CB`, `CHD_PLANE_CR`, `CHD_PLANE_R`, `CHD_PLANE_G`, `CHD_PLANE_B` |
@@ -581,7 +581,7 @@ PAL). Translating a standard's sample number to ours is a fixed rotation — add
 244 calls samples 0..767 is samples 125..892 here. Those constants are for
 sync-start rows; on a blanking-start raster the rotation is 142 (NTSC), 187
 (PAL), or 141 (PAL-M), putting the same region at samples 142..909.
-[`chd_video_standard_sample_to_row_sample`](#chd_video_standard_sample_to_row_sample--chd_video_row_sample_to_standard_sample)
+[`chd_video_standard_sample_to_row_sample`](#chd_video_standard_sample_to_row_sample-chd_video_row_sample_to_standard_sample)
 performs the right rotation for the opened source, so callers placing a
 standards-referenced window need not track the alignment themselves. Do not
 read a `first_active_sample` value as an ST 244 / EBU 3280 sample index.
@@ -713,7 +713,7 @@ chd_status_t chd_video_open_composite(const char *path,
 ```
 
 Open a single-file composite capture: an ld-decode `.tbc` or a CVBS
-`.composite`. The sidecar flavour is detected automatically.
+`.cvbs`. The sidecar flavour is detected automatically.
 
 - `metadata_path_or_null`: `NULL` auto-locates the sidecar next to the data
   file: an ld-decode `<path>.db` (SQLite) / `<path>.json`, else a CVBS
@@ -742,7 +742,7 @@ chd_status_t chd_video_open_yc(const char *luma_path,
                                chd_video_t **out);
 ```
 
-Open a dual-file Y/C capture: a CVBS `.y` + `.c` pair, or a vhs-decode luma
+Open a dual-file Y/C capture: a CVBS `.cvbsy` + `.cvbsc` pair, or a vhs-decode luma
 `.tbc` + chroma `.tbc` pair. Sidecar resolution and flavour detection follow
 [`chd_video_open_composite`](#chd_video_open_composite); the
 `metadata_path_or_null` applies to the luma plane, and the chroma plane uses its
@@ -751,8 +751,8 @@ single shared `<base>.tbc.json` for the pair).
 
 For a vhs-decode pair the two planes are decoded separately and merged: the
 luma plane is decoded with the Mono kind for Y and the chroma plane with the
-configured colour kind for Cb/Cr. A CVBS `.y`/`.c` pair instead reconstructs a
-composite from the centred-chroma `.c` and decodes it in one pass.
+configured colour kind for Cb/Cr. A CVBS `.cvbsy`/`.cvbsc` pair instead reconstructs a
+composite from the centred-chroma `.cvbsc` and decodes it in one pass.
 
 ### chd_video_get_info
 
@@ -968,8 +968,6 @@ and any decoder-kind restriction.
 | `CHD_OPT_COMB_ADAPT_THRESHOLD`      | f64  | Adaptive 3D candidate threshold; `CHD_DEC_NTSC_3D` only.                                                                     |
 | `CHD_OPT_COMB_CHROMA_WEIGHT`        | f64  | Adaptive 3D chroma penalty weight; `CHD_DEC_NTSC_3D` only.                                                                   |
 | `CHD_OPT_COMB_SHOW_MAP`             | bool | Overlay the adaptive 3D decision map; `CHD_DEC_NTSC_3D` only.                                                                |
-| `CHD_OPT_CHROMA_FILTER`             | str  | `"compat"` (default), `"equiband_wide"` (NTSC), `"equiband"`, `"color_under"`, `"wideband_i_ssb"` (NTSC), `"equiband_vsb"` (PAL). See [Chroma filter](#chroma-filter).      |
-| `CHD_OPT_CHROMA_UPPER_SIDEBAND_HZ`  | f64  | Upper-sideband room +X above fSC; `"equiband_vsb"` only. See [Chroma filter](#chroma-filter).                                |
 | `CHD_OPT_CHROMA_IDENT_MODE`         | str  | `"auto"` (default), `"porch"`, `"bottles"`, or `"manual"`; `CHD_DEC_SECAM` only. See [SECAM line identification](#secam-line-identification). |
 | `CHD_OPT_CHROMA_IDENT_MANUAL`       | str  | `"db_first"` or `"dr_first"`; required iff `chroma_ident_mode` is `"manual"`.                                                |
 | `CHD_OPT_CHROMA_CLICK_NR_LEVEL`     | f64  | SECAM FM click concealment, `0.0`–`1.0` (default `1.0`; `0.0` bypasses the stage). See [SECAM click concealment](#secam-click-concealment). |
@@ -1076,115 +1074,6 @@ auditable after the fact. Concealed spans are reported through
 every-row-is-real honesty contract: consumers see exactly which chroma
 samples are concealed rather than genuine.
 
-### Chroma filter { #chroma-filter }
-
-`CHD_OPT_CHROMA_FILTER` selects how the comb (NTSC: `CHD_DEC_NTSC_*`,
-`CHD_DEC_NN_TRANSFORM3D`) and PalColour (PAL/PAL-M: `CHD_DEC_PAL_2D`,
-`CHD_DEC_TRANSFORM_*`) decoders band-limit the demodulated chroma. There are two
-things you can set:
-
-- **The mode** (`CHD_OPT_CHROMA_FILTER`): what to do with the band. Pass the
-  legacy/compat width, the standards equiband width, a narrow colour-under width,
-  or *recover* the clipped vestigial sideband. A small closed set, shared across
-  systems where applicable.
-- **The upper-sideband cutoff** (`CHD_OPT_CHROMA_UPPER_SIDEBAND_HZ`): the
-  frequency +X (Hz above the subcarrier) where the channel clipped the upper
-  sideband. Only the PAL recovery mode `equiband_vsb` reads it; every other mode
-  ignores it (and setting it there is rejected).
-
-The shared, standards-clean modes are `equiband` (1.3 MHz, SMPTE ST 170 Annex
-A.4 / ITU-R BT.1700) and the narrower `color_under` (~0.5 MHz, VHS/S-VHS), both
-valid on either system. `compat` is the portable, **system-resolved** legacy
-default (and what an unset option resolves to): it reproduces each decoder's
-current behaviour, either ~2.2 MHz on NTSC (identical to `equiband_wide`) or the
-1.1/0.93 dot-pattern-tuned ~1.18 MHz on PAL, so a caller can pin "today's decode"
-without memorising a per-system token. The two recovery modes are named by method
-because the algorithms differ, and they split by system: `wideband_i_ssb` (NTSC,
-Hilbert single-sideband) and `equiband_vsb` (PAL, amplitude EQ).
-
-| Mode             | NTSC                          | PAL / PAL-M                   | Upper-sideband +X |
-|------------------|-------------------------------|-------------------------------|-------------------|
-| `compat`         | ~2.2 MHz (≡ `equiband_wide`)  | 1.18 MHz (legacy default)     | n/a               |
-| `equiband_wide`  | ~2.2 MHz                      | *invalid (use `compat`)*      | n/a               |
-| `equiband`       | 1.3 MHz                       | 1.3 MHz                       | n/a               |
-| `color_under`    | ~0.5 MHz                      | ~0.5 MHz                      | n/a               |
-| `wideband_i_ssb` | wideband-I + Hilbert SSB      | *invalid*                     | fixed (built-in)  |
-| `equiband_vsb`   | *invalid*                     | equiband + vestigial EQ       | required          |
-
-Only `equiband_vsb` takes the upper-sideband cutoff as an option; `wideband_i_ssb`
-has its geometry fixed by the built-in NTSC-1953 reconstruction filters (I to
-1.3 MHz, Q to 0.6 MHz; set the asymmetry shape with
-[`chd_decoder_set_chroma_sideband_calib`](#chd_decoder_set_chroma_sideband_calib)
-instead), and the symmetric modes have no vestige to recover. Invalid
-`(mode, system)` combinations are rejected at [`chd_decoder_commit`](#chd_decoder_commit)
-with `CHD_E_INVALID_ARG`. The default (no option) and `compat` are
-**byte-identical to the decoder's previous behaviour** on both systems; the
-narrower modes and the recovery modes are opt-in only.
-
-#### The equiband modes { #chroma-filter-equiband }
-
-| Token            | Meaning                                                                                                                                                                                                                                                                            |
-|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `equiband`       | 1.3 MHz on both U and V; the nominal equiband U/V bandwidth of SMPTE ST 170 Annex A.4 / ITU-R BT.1700, and the same ~1.3 MHz baseband mask both systems apply before modulation. The right match for LaserDisc/LaserVision and anything from a modern equiband encoder.            |
-| `color_under`    | ~0.5 MHz on both U and V; matches the surviving chroma bandwidth of VHS/S-VHS colour-under recordings, which take chroma off at ±0.5 MHz and re-modulate it symmetric-DSB (IEC 60774-1 §6.2; S-VHS shares the same chroma path). The colour-under process erases any vestigial/wideband-I structure, so a symmetric ~0.5 MHz low-pass is both necessary and sufficient (a wider filter only integrates colour-under noise). Symmetric, so it needs no phase compensation. |
-| `equiband_wide`  | NTSC only. The widest equiband setting: a single ~2.2 MHz low-pass on both U and V. Keeps the most chroma detail, along with whatever cross-colour the comb let through. The looser-than-standards `ld-chroma-decoder` legacy default, which `compat` resolves to on NTSC. PAL has no wider-than-equiband option (its legacy default sits *below* 1.3 MHz and is reached via `compat`). |
-
-#### NTSC recovery: `wideband_i_ssb` { #chroma-filter-wideband-i-ssb }
-
-The NTSC-1953 asymmetric split (1.3 MHz on I, 0.6 MHz on Q) plus single-sideband
-reconstruction. NTSC-1953 transmits wideband I above
-~0.6 MHz lower-sideband-only; this mode Hilbert-transforms the resulting
-crosstalk off the Q channel and back onto I, restoring the ~0.6 to 1.3 MHz I
-detail to full amplitude. That is the closest match to the NTSC-1953 signal
-definition, and the digital realization of the wideband recovery EG 27 §5.9
-attributes to early NTSC receivers (lower-sideband recovery summed with the
-quadrature-demodulated lows). The Hilbert filter rejects ≥36 dB through Q's
-entire spec allocation (≤0.6 MHz), so real Q content does not paint onto I; both
-I and Q are also equalized against the decoder's known chroma-prefilter droop,
-restoring the band-edge response the other modes re-attenuate (~1.5 dB at
-1.0 MHz). Only useful on sources that actually carry wideband I; on equiband
-material it adds I-channel noise from whatever real energy sits in the 0.6 to
-1.3 MHz region of Q.
-
-`wideband_i_ssb` operates on the burst-locked I/Q channels, so it implies
-`CHD_OPT_PHASE_COMPENSATION=1` unless the caller explicitly sets it to `0`, in
-which case the demodulated planes stay on the U/V grid and it degrades to the
-symmetric `equiband` response. Its geometry is fixed by the built-in NTSC-1953
-reconstruction filters (I to 1.3 MHz, Q to 0.6 MHz, the SSB Hilbert recovering the
-I detail between Q's 0.6 MHz limit and 1.3 MHz), so it takes no numeric +X cutoff
-(it rejects one). To refine the vestigial-rolloff shape for a particular source,
-attach a measured profile via
-[`chd_decoder_set_chroma_sideband_calib`](#chd_decoder_set_chroma_sideband_calib). To find out whether a
-source actually carries lower-sideband wideband I before choosing it, measure it
-with [`chd_chroma_sideband_calibrate`](#chd_chroma_sideband_calibrate).
-
-#### PAL recovery: `equiband_vsb` { #chroma-filter-equiband-vsb }
-
-PAL transmits both U and V equiband (DSB to ~1.3 MHz), then the channel clips
-the **upper** sideband at the video-band edge, leaving the band from +X up to
-~1.3 MHz lower-sideband-only (recovered at half amplitude by synchronous
-demodulation). Unlike NTSC, PAL's line-alternating V already cancels the U/V
-quadrature crosstalk, so recovery reduces to a pure **amplitude EQ**: unity below
-+X, ramping to +6 dB (×2) at the 1.3 MHz ceiling, restoring the vestige to full
-amplitude. The bulk chroma (below +X) is untouched.
-
-`equiband_vsb` **requires** `CHD_OPT_CHROMA_UPPER_SIDEBAND_HZ` (there is no blind
-PAL β estimator and no single baked default); commit rejects it otherwise. +X is
-the upper-sideband room above the subcarrier, in Hz, from the source's known
-geometry:
-
-| System(s)                       | fSC (MHz) | +X (Hz)  |
-|---------------------------------|-----------|----------|
-| I/PAL                           | 4.4336    | 1066000  |
-| B, B1, D, D1, G, H, K / PAL     | 4.4336    | 570000   |
-| M/PAL                           | 3.5756    | 600000   |
-| N/PAL (Argentina, 3.582 fSC)    | 3.582     | 620000   |
-
-Use it on clean sources (LaserDisc, studio); it lifts vestige noise as well as
-signal, so a noisy off-air/tape capture is better served by `color_under`
-(discard the vestige). +X must be in (0, 1.3 MHz), and is only meaningful with
-`equiband_vsb`; supplying it with any other mode is rejected at commit.
-
 ### Phase compensation { #phase-compensation }
 
 `CHD_OPT_PHASE_COMPENSATION` (NTSC; off by default) derives each line's
@@ -1210,92 +1099,6 @@ Each decoder applies the measurement where its pipeline allows:
 The measurement is per line from a single burst, so it corrects line-to-line
 phase error but not drift within a line. A line whose burst is too weak to
 measure keeps the nominal phase for that line.
-
-### chd_chroma_sideband_calibrate
-
-```c
-typedef struct chd_chroma_sideband_calib {
-    double  beta_plateau;       /* 0 = symmetric/DSB source, 1 = full lower-sideband */
-    double  edge_center_hz;
-    double  edge_width_hz;
-    double  coherence;          /* mean I/Q coherence over 0.70-1.00 MHz, 0..1 */
-    double  fit_rms;            /* weighted residual of the model fit */
-    int64_t lines_accumulated;
-    int32_t is_wideband_i;      /* 1 = classified as carrying lower-sideband wideband I */
-    int32_t _pad;
-    void *reserved[4];
-} chd_chroma_sideband_calib_t;
-
-chd_status_t chd_chroma_sideband_calibrate(chd_video_t *v,
-                                    int64_t first_frame, int64_t num_frames,
-                                    chd_chroma_sideband_calib_t *out);
-```
-
-Measure the source's chroma sideband asymmetry, a provenance diagnostic for
-NTSC-1953-era material. NTSC-1953 transmitted wideband I above ~0.6 MHz
-lower-sideband-only; whether a given capture preserved that (and the exact
-shape of the channel's vestigial rolloff) depends on its provenance chain
-(studio-direct vs off-air, transmitter and tuner filtering, dub generation),
-not on the standard. This pass demodulates frames `[first_frame, first_frame +
-num_frames)` (`num_frames <= 0` = through the last frame) with a burst-locked
-2D comb, accumulates the quadrature cross-spectrum between the demodulated I
-and Q planes over every active line, and fits the per-frequency
-sideband-asymmetry profile `beta(f) = (b−a)/(a+b)` (`a`/`b` the upper/lower
-sideband gains) as a raised-cosine ramp from 0 to `beta_plateau` across
-`edge_center_hz ± edge_width_hz/2`.
-
-The estimator reads the *imaginary* part of the I·Q cross-spectrum:
-lower-sideband crosstalk is a Hilbert (90°) relationship, while picture-driven
-I/Q correlation and burst-phase error are in-phase, so the dominant biases are
-rejected structurally. `coherence` is the magnitude-squared I/Q coherence over
-0.70–1.00 MHz, where real Q is zero by construction and a wideband-I source
-must show a near-deterministic relationship; it acts as the confidence gate
-behind `is_wideband_i` (coherence ≥ 0.5 and plateau ≥ 0.25). Expect
-`is_wideband_i = 0` with plateau ≈ 0 on equiband material (LaserDisc, modern
-encoders) and on studio-direct tape that never passed a channel edge.
-
-This is pure measurement: no decoder state is created or modified. Returns
-`CHD_E_DECODER_INCOMPATIBLE` for non-NTSC or non-4fSC sources and
-`CHD_E_OUT_OF_RANGE` for a bad frame range. Cost is one 1024-point FFT per
-line, single-threaded, far cheaper than decoding the same range. Not safe
-concurrently with decoding the same `chd_video_t`. To have the decode consume
-the result, attach it with
-[`chd_decoder_set_chroma_sideband_calib`](#chd_decoder_set_chroma_sideband_calib).
-
-### chd_decoder_set_chroma_sideband_calib
-
-```c
-chd_status_t chd_decoder_set_chroma_sideband_calib(chd_decoder_t *d,
-                                      const chd_chroma_sideband_calib_t *calib);
-```
-
-Attach a β profile to a decoder before [`chd_decoder_commit`](#chd_decoder_commit).
-With `chroma_filter="wideband_i_ssb"`, commit synthesizes a pair of
-correction filters from the profile and the reconstruction applies them:
-
-- **Transition-strip I equalization**: direct-path gain `1 + β(f)·(1 − W(f))`
-  (`W` the built-in Hilbert skirt), restoring full-amplitude I through the
-  vestigial 0.4–0.7 MHz transition where the upper sideband is partially
-  attenuated. The gain blends exactly into the skirt's vestige-blind region
-  (→ 1 where the skirt is fully on) and is identity at β = 0.
-- **Q crosstalk nulling**: subtracts `β·ĥ(I)` (Hilbert of the clean,
-  q-free I observation, scaled by the profile) from the Q plane ahead of its
-  low-pass, removing the hue-transient ghost that asymmetric-sideband I detail
-  paints onto Q, the artifact period receivers displayed.
-
-The natural source of the profile is [`chd_chroma_sideband_calibrate`](#chd_chroma_sideband_calibrate)
-on the same capture; a caller-constructed preset is also accepted (an explicit
-decision: never apply a nominal preset to material of unknown provenance, as
-assuming a vestige on a symmetric-sideband source *creates* artifacts).
-
-Fallback semantics: the profile's classification gate is honoured. A NULL
-`calib` clears; `is_wideband_i == 0` or `beta_plateau == 0` is accepted but
-inert (β ≡ 0), producing output bit-identical to having no profile, so
-"didn't calibrate", "calibrated a DSB source", and "estimate wasn't trusted"
-all converge on the same decode. An *active* profile combined with any
-`chroma_filter` other than `"wideband_i_ssb"` is rejected at commit.
-`beta_plateau` must be in `[0, 1]`; an active profile additionally requires
-`edge_center_hz` in `(0, 1.6 MHz]` and `edge_width_hz` in `(0, 1.2 MHz]`.
 
 ### chd_decode_frame
 

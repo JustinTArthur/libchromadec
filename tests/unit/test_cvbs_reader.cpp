@@ -2,13 +2,13 @@
 //
 // End-to-end smoke tests for the CVBS readers.
 //
-//   1. Synthesise a `.composite` file with two NTSC fields' worth of
+//   1. Synthesise a `.cvbs` file with two NTSC fields' worth of
 //      uniform CVBS_U10_4FSC samples + a `.meta` sqlite sidecar with
 //      preset = NTSC, encoding = CVBS_U10_4FSC, state = STANDARD_TBC_LOCKED.
 //      Exercise chd_video_open_composite + chd_video_get_info; verify
 //      the field count and sample-encoding fold (× 64).
 //
-//   2. Synthesise a YC pair (`.y` + `.c`) with the same metadata; verify
+//   2. Synthesise a YC pair (`.cvbsy` + `.cvbsc`) with the same metadata; verify
 //      composite synthesis = luma + (chroma − 512).
 //
 //   3. Synthesise a meta sidecar with an unknown preset; verify the open
@@ -87,8 +87,8 @@ CREATE TABLE cvbs_file (
 );
 )";
 
-// The spec's current revision: user_version 8 adds CVBS_S16_FSC and the
-// audio_locked column. Both versions must open.
+// user_version 8 adds the audio_locked column. Superseded, but files written
+// against it are still in the wild and must open.
 const char *kCvbsSchemaV8 = R"(
 PRAGMA user_version = 8;
 
@@ -106,6 +106,32 @@ CREATE TABLE cvbs_file (
     has_nonstandard_values      BOOLEAN,
     audio_locked                BOOLEAN,
     capture_notes               TEXT
+);
+)";
+
+// The spec's current revision: user_version 10 drops audio_locked and carries
+// audio metadata in a sibling table this reader never touches.
+const char *kCvbsSchemaV10 = R"(
+PRAGMA user_version = 10;
+
+CREATE TABLE cvbs_file (
+    cvbs_file_id                INTEGER PRIMARY KEY,
+    preset                      TEXT    NOT NULL,
+    sample_encoding_preset      TEXT    NOT NULL,
+    signal_state_preset         TEXT    NOT NULL,
+    signal_type                 TEXT    NOT NULL,
+    decoder                     TEXT    NOT NULL,
+    git_branch                  TEXT,
+    git_commit                  TEXT,
+    number_of_sequential_frames INTEGER,
+    black_level                 INTEGER,
+    has_nonstandard_values      BOOLEAN,
+    capture_notes               TEXT
+);
+
+CREATE TABLE audio_channel_pair (
+    channel_pair                INTEGER PRIMARY KEY,
+    description                 TEXT
 );
 )";
 
@@ -150,7 +176,7 @@ bool writeUniformSamples(const std::string &path, size_t numSamples, int16_t val
 int testCompositeOpen() {
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "test.composite").string();
+    const std::string composite = (tmpDir / "test.cvbs").string();
     const std::string meta      = (tmpDir / "test.meta").string();
 
     // Two NTSC fields = 2 × 910 × 263 = 478,660 samples of value 256 (blanking
@@ -179,7 +205,7 @@ int testCompositeOpen() {
 int testCompositeMissingMeta() {
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "nometa.composite").string();
+    const std::string composite = (tmpDir / "nometa.cvbs").string();
     const std::string meta      = (tmpDir / "nometa.meta").string();
     if (fs::exists(meta)) fs::remove(meta);
     REQUIRE(writeUniformSamples(composite, 910 * 263 * 2, 256));
@@ -195,7 +221,7 @@ int testCompositeMissingMeta() {
 int testCompositeUnknownPreset() {
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "bad.composite").string();
+    const std::string composite = (tmpDir / "bad.cvbs").string();
     const std::string meta      = (tmpDir / "bad.meta").string();
     REQUIRE(writeUniformSamples(composite, 910 * 263 * 2, 256));
     REQUIRE(writeMetaSidecar(meta, "DOES_NOT_EXIST", "CVBS_U10_4FSC", "STANDARD_TBC_LOCKED", "composite"));
@@ -211,7 +237,7 @@ int testCompositeOverride() {
     // No sidecar; supply chd_video_params_t override.
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "override.composite").string();
+    const std::string composite = (tmpDir / "override.cvbs").string();
     const std::string meta      = (tmpDir / "override.meta").string();
     if (fs::exists(meta)) fs::remove(meta);
     REQUIRE(writeUniformSamples(composite, 910 * 263 * 2, 256));
@@ -237,7 +263,7 @@ int testCompositeSampleConversion() {
     using namespace chd::format;
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "samples.composite").string();
+    const std::string composite = (tmpDir / "samples.cvbs").string();
     const size_t samplesPerField = 910 * 263;
     // Write samples with int16 value 282 (10-bit "black" for PAL — testing
     // the conversion path itself).
@@ -260,8 +286,8 @@ int testYcSynthesis() {
     using namespace chd::format;
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string yPath = (tmpDir / "yc.y").string();
-    const std::string cPath = (tmpDir / "yc.c").string();
+    const std::string yPath = (tmpDir / "yc.cvbsy").string();
+    const std::string cPath = (tmpDir / "yc.cvbsc").string();
 
     // One NTSC field of luma at value 282 (10-bit "black") + chroma at value
     // 600 (excursion of +88 from centre 512). After synthesis:
@@ -349,7 +375,7 @@ int testFrameNativeNtscConform() {
     using namespace chd::format;
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "native_ntsc.composite").string();
+    const std::string composite = (tmpDir / "native_ntsc.cvbs").string();
     REQUIRE(writeNativeFrames(composite, 910, 525, 2));
 
     chd::reader::CvbsCompositeSource src;
@@ -406,7 +432,7 @@ int testFrameNativePalConform() {
     using namespace chd::format;
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "native_pal.composite").string();
+    const std::string composite = (tmpDir / "native_pal.cvbs").string();
     // 625 uniform 1135-sample lines plus the 4 leftover samples per frame
     // (valued 625 + frameIndex): exactly 709,379 samples/frame.
     REQUIRE(writeNativeFrames(composite, 1135, 625, 2, 4));
@@ -491,7 +517,7 @@ int testEncoderScLockedValidation() {
     // Flatten: native stream = the first 709,379 samples of each field pair.
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string native = (tmpDir / "flattened_sclocked.composite").string();
+    const std::string native = (tmpDir / "flattened_sclocked.cvbs").string();
     {
         std::ofstream out(native, std::ios::binary);
         REQUIRE(out.is_open());
@@ -571,7 +597,7 @@ int testEncoderScLockedValidation() {
 int testFrameNativePalMAbi() {
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "native_palm.composite").string();
+    const std::string composite = (tmpDir / "native_palm.cvbs").string();
     const std::string meta      = (tmpDir / "native_palm.meta").string();
     REQUIRE(writeNativeFrames(composite, 909, 525, 1));
     REQUIRE(writeMetaSidecar(meta, "PAL_M", "CVBS_U10_4FSC", "STANDARD_TBC_LOCKED", "composite"));
@@ -594,7 +620,7 @@ int testFrameNativePalMAbi() {
 int testPalFrameNativeAbi() {
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "native_pal_abi.composite").string();
+    const std::string composite = (tmpDir / "native_pal_abi.cvbs").string();
     const std::string meta      = (tmpDir / "native_pal_abi.meta").string();
     REQUIRE(writeUniformSamples(composite, 709379, 256));
     REQUIRE(writeMetaSidecar(meta, "PAL", "CVBS_U10_4FSC", "STANDARD_TBC_LOCKED", "composite"));
@@ -615,13 +641,13 @@ int testPalFrameNativeAbi() {
 }
 
 int testSubcarrierLockDerivationAndMerge() {
-    // A field-raster PAL .composite in STANDARD_TBC_LOCKED state is
+    // A field-raster PAL .cvbs in STANDARD_TBC_LOCKED state is
     // line-locked by default (burst lock is not lattice lock); the caller
     // override marks the encoder-style subcarrier-locked raster, and merges
     // even though a sidecar is present.
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "raster_pal.composite").string();
+    const std::string composite = (tmpDir / "raster_pal.cvbs").string();
     const std::string meta      = (tmpDir / "raster_pal.meta").string();
     REQUIRE(writeUniformSamples(composite, 1135 * 313 * 2, 256));
     REQUIRE(writeMetaSidecar(meta, "PAL", "CVBS_U10_4FSC", "STANDARD_TBC_LOCKED", "composite"));
@@ -665,30 +691,40 @@ int testSubcarrierLockDerivationAndMerge() {
     return 0;
 }
 
-int testS16FscAndSchemaV8() {
+int testS16_4FscAndSchemaVersions() {
     using namespace chd::format;
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "s16fsc.composite").string();
-    const std::string meta      = (tmpDir / "s16fsc.meta").string();
+    const std::string composite = (tmpDir / "s16_4fsc.cvbs").string();
+    const std::string meta      = (tmpDir / "s16_4fsc.meta").string();
 
-    // NTSC white in CVBS_S16_FSC: (800 - 240) x 32 = 17920 on disk.
+    // NTSC white in CVBS_S16_4FSC: (800 - 240) x 32 = 17920 on disk.
     REQUIRE(writeUniformSamples(composite, 910 * 263 * 2, 17920));
-    REQUIRE(writeMetaSidecar(meta, "NTSC", "CVBS_S16_FSC", "STANDARD_TBC_LOCKED",
-                             "composite", kCvbsSchemaV8));
+    REQUIRE(writeMetaSidecar(meta, "NTSC", "CVBS_S16_4FSC", "STANDARD_TBC_LOCKED",
+                             "composite", kCvbsSchemaV10));
 
     chd_video_t *v = nullptr;
     REQUIRE(chd_video_open_composite(composite.c_str(), meta.c_str(), nullptr, &v) == CHD_OK);
     chd_video_info_t info{};
     REQUIRE(chd_video_get_info(v, &info) == CHD_OK);
-    REQUIRE(info.encoding == CHD_ENC_CVBS_S16_FSC);
+    REQUIRE(info.encoding == CHD_ENC_CVBS_S16_4FSC);
     REQUIRE(info.num_frames == 1);
+    chd_video_free(v);
+
+    // The pre-v1.4.0 spelling names the same encoding. It cannot be told apart
+    // by user_version (the rename did not bump it), so it resolves whatever
+    // schema revision declares it.
+    REQUIRE(writeMetaSidecar(meta, "NTSC", "CVBS_S16_FSC", "STANDARD_TBC_LOCKED",
+                             "composite", kCvbsSchemaV8));
+    REQUIRE(chd_video_open_composite(composite.c_str(), meta.c_str(), nullptr, &v) == CHD_OK);
+    REQUIRE(chd_video_get_info(v, &info) == CHD_OK);
+    REQUIRE(info.encoding == CHD_ENC_CVBS_S16_4FSC);
     chd_video_free(v);
 
     // The blanking-offset conversion runs with the standard's own blanking.
     chd::reader::CvbsCompositeSource src;
     REQUIRE(src.open(composite, getVideoStandard(VideoStandard::NTSC),
-                     SampleEncoding::CVBS_S16_FSC, SignalState::STANDARD_TBC_LOCKED));
+                     SampleEncoding::CVBS_S16_4FSC, SignalState::STANDARD_TBC_LOCKED));
     REQUIRE(src.getVideoField(1)[0] == 800 * 64);
     return 0;
 }
@@ -718,7 +754,7 @@ int testFrameNativeSyncStartWindows() {
     using namespace chd::format;
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "syncstart_ntsc.composite").string();
+    const std::string composite = (tmpDir / "syncstart_ntsc.cvbs").string();
     {
         std::ofstream out(composite, std::ios::binary);
         REQUIRE(out.is_open());
@@ -822,7 +858,7 @@ int testLayoutOverrideMerge() {
     // with the sidecar still supplying the preset triple.
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string composite = (tmpDir / "forced_raster.composite").string();
+    const std::string composite = (tmpDir / "forced_raster.cvbs").string();
     const std::string meta      = (tmpDir / "forced_raster.meta").string();
     REQUIRE(writeNativeFrames(composite, 910, 525, 2));
     REQUIRE(writeMetaSidecar(meta, "NTSC", "CVBS_U10_4FSC", "STANDARD_TBC_LOCKED", "composite"));
@@ -844,8 +880,8 @@ int testFrameNativeYc() {
     using namespace chd::format;
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string yPath = (tmpDir / "native.y").string();
-    const std::string cPath = (tmpDir / "native.c").string();
+    const std::string yPath = (tmpDir / "native.cvbsy").string();
+    const std::string cPath = (tmpDir / "native.cvbsc").string();
     // Luma carries the line index, chroma is centred (512 = no excursion), so
     // the synthesized composite reproduces the conform mapping directly.
     REQUIRE(writeNativeFrames(yPath, 910, 525, 1));
@@ -865,7 +901,7 @@ int testFrameNativeYc() {
     return 0;
 }
 
-// Diagnostic hook: point CHD_TEST_CVBS_COMPOSITE at a real `.composite`
+// Diagnostic hook: point CHD_TEST_CVBS_COMPOSITE at a real `.cvbs`
 // (with its `.meta` alongside) to surface the layout resolution and the
 // horizontal-alignment measurement for that capture.
 int testRealCompositeDiagnostics() {
@@ -914,7 +950,7 @@ int main() {
     rc |= testFrameNativePalMAbi();
     rc |= testPalFrameNativeAbi();
     rc |= testSubcarrierLockDerivationAndMerge();
-    rc |= testS16FscAndSchemaV8();
+    rc |= testS16_4FscAndSchemaVersions();
     rc |= testMeasureRowZeroH();
     rc |= testMeasureNtscFieldBurstPolarity();
     rc |= testResolveFrameNativeAlignment();

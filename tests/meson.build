@@ -11,7 +11,7 @@
 #   which is what a real consumer gets.
 # - chromadec_internal_dep links the static archive, because the shared object's
 #   export list exposes the chd_* ABI alone by design, and internal C++ symbols
-#   (Comb, ComponentFrame, chd::decoders::chroma_filter, the metadata readers)
+#   (Comb, ComponentFrame, the metadata readers)
 #   are not in it. It also carries CHD_WITH_NN, which has to match the library
 #   build for any translation unit that sees an NN-gated internal header: the
 #   gated members change object layout, so a mismatch is an ODR violation.
@@ -96,26 +96,6 @@ test_ntsc_burst = executable('test_ntsc_burst',
   dependencies: chromadec_internal_dep)
 test('ntsc_burst', test_ntsc_burst)
 
-# NTSC-1953 SSB wideband-I reconstruction. Synthesizes burst-locked
-# composite fields with single- and double-sideband chroma tones, decodes
-# them through the comb decoder's ChromaFilterMode variants, and asserts
-# amplitude recovery / axis separation.
-test_ntsc_chroma_ssb = executable('test_ntsc_chroma_ssb',
-  'unit/test_ntsc_chroma_ssb.cpp',
-  dependencies: chromadec_internal_dep)
-test('ntsc_chroma_ssb', test_ntsc_chroma_ssb)
-
-# NTSC-1953 sideband-asymmetry calibration (BetaAccumulator, β fit, and
-# the chd_chroma_sideband_calibrate argument validation). Synthesizes fields with
-# a known vestige profile and checks the recovered β/coherence/
-# classification.
-test_ntsc1953_calibration = executable('test_ntsc1953_calibration',
-  'unit/test_ntsc1953_calibration.cpp',
-  dependencies: chromadec_internal_dep)
-# Sits close to the 30s default under sanitizer instrumentation; give it the
-# same headroom as the SECAM decode so instrumented runs don't flake out.
-test('ntsc1953_calibration', test_ntsc1953_calibration, timeout: 300)
-
 # format/ DATA-table sanity tests (preset lookup, sample conversion, signal-state
 # mappings).
 test_format_presets = executable('test_format_presets',
@@ -139,13 +119,6 @@ test_error_propagation = executable('test_error_propagation',
   dependencies: [chromadec_internal_dep, sqlite3_dep])
 test('error_propagation', test_error_propagation)
 
-# Cross-system chroma-filter table (intent×system validity + standards cutoffs)
-# and the equiband_vsb EQ synthesis (frequency-response checks).
-test_chroma_filter = executable('test_chroma_filter',
-  'unit/test_chroma_filter.cpp',
-  dependencies: chromadec_internal_dep)
-test('chroma_filter', test_chroma_filter)
-
 # The colour-difference / broadcast-scaling precision options: the resolved
 # matrix for each pairing, and RGB48 vs RGBS agreement on a frame with chroma.
 test_color_conversion = executable('test_color_conversion',
@@ -154,7 +127,7 @@ test_color_conversion = executable('test_color_conversion',
 test('color_conversion', test_color_conversion)
 
 # CVBS reader end-to-end smoke tests. Uses the C ABI's
-# chd_video_open_composite / chd_video_open_yc entry points + reaches into the internal
+# chd_video_open_cvbs_* entry points + reaches into the internal
 # CvbsCompositeSource / CvbsYcSource for sample-level assertions.
 test_cvbs_reader = executable('test_cvbs_reader',
   'unit/test_cvbs_reader.cpp',

@@ -16,12 +16,10 @@
 
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include <chromadec/calibration.h>
 #include <chromadec/decoder.h>
 
 #include "../metadata/core.h"
@@ -43,10 +41,6 @@ struct OptionMaps {
     std::unordered_map<std::string, int32_t>     i32;
     std::unordered_map<std::string, bool>        boolean;
     std::unordered_map<std::string, std::string> str;
-
-    // NTSC-1953 β profile stashed by chd_decoder_set_chroma_sideband_calib; consumed by
-    // fillCombConfig when active (is_wideband_i and beta_plateau > 0).
-    std::optional<chd_chroma_sideband_calib_t> sidebandCalib;
 };
 
 // Resolve CHD_DEC_AUTO to a concrete kind based on the input video
@@ -79,11 +73,6 @@ bool applyNnModel(chd_decoder_kind_t kind,
 // True if `kind` is one of the NN-driven kinds (nnTransform3D, ldzeug2).
 // Used by the option setters to gate NN-only option names.
 bool kindUsesNn(chd_decoder_kind_t kind);
-
-// True if `kind` is one of the NTSC comb decoders (CHD_DEC_NTSC_*,
-// CHD_DEC_NN_TRANSFORM3D), or AUTO. Used to gate the NTSC-only chroma
-// sideband calibration profile, which the PAL decoders never consume.
-bool isNtscCombKind(chd_decoder_kind_t kind);
 
 }  // namespace chd::decoders::registry
 

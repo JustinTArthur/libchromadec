@@ -36,7 +36,6 @@
 #include "transform_pal_2d.h"
 #include "transform_pal_3d.h"
 
-#include "../chroma_filter.h"
 #include "../filter/firfilter.h"
 #include "../filter/deemp.h"
 
@@ -193,10 +192,9 @@ void PalColour::buildLookUpTables()
     // similar enough for the filters to be the same size) allows them to be
     // computed together later.
     //
-    // The cutoff comes from the resolved chroma_filter mode; the default
-    // (compat) is the 1.1/0.93 dot-pattern-tuned value the 0.93 empirical
-    // fudge for the 4Fsc sampled LaserDisc scans always was.
-    const double chromaBandwidthHz = configuration.chromaBandwidthHz;
+    // The 1.1 MHz/0.93 is the dot-pattern-tuned legacy value; the 0.93 is a
+    // bit empirical for the 4fSC sampled LaserDisc scans.
+    const double chromaBandwidthHz = 1100000.0 / 0.93;
 
     // Compute filter widths based on chroma bandwidth.
     // ca is the kernel's half-width in samples; the symmetric kernel is 2*ca
@@ -208,9 +206,9 @@ void PalColour::buildLookUpTables()
     // Size the coefficient tables to the nonzero kernel: the raised cosine is
     // exactly zero at and beyond ca, so floor(ca) is the highest tap that
     // carries any weight. Sizing from (ca, ya) rather than a fixed ceiling is
-    // what lets narrow chroma bandwidths (color_under) and non-LD sample rates
-    // work, and it is byte-identical at the legacy cutoff, where floor(ca) is
-    // the value the old fixed table size was hand-tuned to.
+    // what lets non-LD sample rates work, and it is byte-identical at the
+    // legacy cutoff, where floor(ca) is the value the old fixed table size
+    // was hand-tuned to.
     filterSize = std::max({1, static_cast<int32_t>(ca), static_cast<int32_t>(ya)});
     cfilt.assign(filterSize + 1, {0.0, 0.0, 0.0, 0.0});
     yfilt.assign(filterSize + 1, {0.0, 0.0});
@@ -276,18 +274,6 @@ void PalColour::buildLookUpTables()
             yfilt[f][i] /= ydiv;
         }
     }
-
-    // equiband_vsb: synthesize the vestige-recovery EQ. The ceiling is the
-    // raised-cosine cutoff itself (the equiband baseband ceiling), so the EQ
-    // lifts exactly the band the bandwidth filter passes above +X. Empty
-    // otherwise (a plain symmetric raised-cosine filter, no EQ).
-    vsbEqTaps.clear();
-    if (configuration.chromaVsbRecovery
-        && configuration.chromaUpperSidebandHz > 0.0
-        && configuration.chromaUpperSidebandHz < chromaBandwidthHz) {
-        vsbEqTaps = chd::decoders::synthesizeVsbEq(configuration.chromaUpperSidebandHz,
-                                                   chromaBandwidthHz, videoParameters.sampleRate);
-    }
 }
 
 void PalColour::decodeFrames(const std::vector<chd::decoders::SourceField> &inputFields, int32_t startIndex, int32_t endIndex,
@@ -326,12 +312,6 @@ void PalColour::decodeField(const chd::decoders::SourceField &inputField, const 
     const int32_t firstLine = inputField.getFirstActiveLine(videoParameters);
     const int32_t lastLine = inputField.getLastActiveLine(videoParameters);
 
-    // equiband_vsb vestige-recovery EQ, applied to the recovered U/V per line.
-    const bool doVsb = !vsbEqTaps.empty();
-    const int32_t eqStart = videoParameters.activeVideoStart;
-    const int32_t eqWidth = videoParameters.activeVideoEnd - eqStart;
-    std::vector<double> eqScratch(doVsb ? eqWidth : 0);
-
     for (int32_t fieldLine = firstLine; fieldLine < lastLine; fieldLine++) {
         LineInfo line(fieldLine);
 
@@ -350,19 +330,6 @@ void PalColour::decodeField(const chd::decoders::SourceField &inputField, const 
         } else {
             // Decode chroma and luma from the Transform PAL output
             decodeLine<double, true>(inputField, chromaData, line, componentFrame);
-        }
-
-        if (doVsb) {
-            // The V-switch already separated U/V and cancelled the vestige's
-            // quadrature crosstalk; lift its half-amplitude droop back to full.
-            const int32_t lineNumber = (line.number * 2) + inputField.getOffset();
-            const auto eq = chd::decoders::filter::makeFIRFilter(vsbEqTaps);
-            double *U = componentFrame.u(lineNumber) + eqStart;
-            double *V = componentFrame.v(lineNumber) + eqStart;
-            eq.apply(U, eqScratch.data(), eqWidth);
-            std::copy(eqScratch.begin(), eqScratch.end(), U);
-            eq.apply(V, eqScratch.data(), eqWidth);
-            std::copy(eqScratch.begin(), eqScratch.end(), V);
         }
     }
 }
@@ -579,8 +546,8 @@ void PalColour::decodeLine(const chd::decoders::SourceField &inputField, const C
         double m[4][MAX_WIDTH], n[4][MAX_WIDTH];
         // The 2D filter reads filterSize samples either side of each active
         // sample, so the quadrature scratch is populated over that halo.
-        // filterSize tracks the chroma bandwidth and sample rate, so a narrow
-        // mode (color_under) or a high sample rate can push the halo past the
+        // filterSize tracks the chroma bandwidth and sample rate, so a high
+        // sample rate can push the halo past the
         // line edges; clamp both ends into [0, MAX_WIDTH) so the fill here and
         // the convolution below stay in bounds. At the usual 4fSC geometry
         // the halo sits well inside the line, the clamps never bind, and the

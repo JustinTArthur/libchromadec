@@ -17,8 +17,8 @@ the minor, and the soname moves with it.
 ## What it decodes
 
 **Sources.** A single-file composite (ld-decode / vhs-decode / encode-orc
-`.tbc`, or a CVBS `.composite`), or a dual-file Y/C pair (luma + chroma `.tbc`,
-or CVBS `.y` + `.c`). Metadata comes from a `.tbc.json`, `.db`, or `.meta`
+`.tbc`, or a CVBS `.cvbs`), or a dual-file Y/C pair (luma + chroma `.tbc`,
+or CVBS `.cvbsy` + `.cvbsc`). Metadata comes from a `.tbc.json`, `.db`, or `.meta`
 sidecar, or from an explicit parameter override where there is none.
 [docs/file-formats.md](docs/file-formats.md) has the reader matrix.
 
@@ -61,8 +61,8 @@ meson test -C build
 when no system copy is found. ONNX Runtime is enabled by default and backs the
 neural decoders; if it is not discoverable, either point the build at it with
 `-Donnxruntime_root=/path/to/onnxruntime` (an unpacked release archive, or a
-restored NuGet package directory, which is the only form the DirectML build
-ships in) or turn it off with
+restored NuGet package directory: `Microsoft.ML.OnnxRuntime.DirectML` or the
+Windows ML package, the two forms DirectML ships in) or turn it off with
 `-Dwith_onnxruntime=false`. FFTW3 is optional and gates Transform-PAL. CUDA,
 ROCm, and native CoreML are auto-detected and gate GPU inference. Run `meson
 configure build` to see every option.

@@ -21,7 +21,7 @@ unsafe impl Send for Video {}
 
 impl Video {
     /// Opens a single-file composite capture (`chd_video_open_composite`): an
-    /// ld-decode `.tbc` or a CVBS `.composite`. With no sidecar path the
+    /// ld-decode `.tbc` or a CVBS `.cvbs`. With no sidecar path the
     /// library auto-locates an ld-decode `<path>.db`/`<path>.json` or a CVBS
     /// `<basename>.meta`, detecting the flavour automatically. See
     /// [`VideoParams`] for how `params` interacts with sidecar metadata.
@@ -48,7 +48,7 @@ impl Video {
         })
     }
 
-    /// Opens a dual-file Y/C capture (`chd_video_open_yc`): a CVBS `.y`/`.c`
+    /// Opens a dual-file Y/C capture (`chd_video_open_yc`): a CVBS `.cvbsy`/`.cvbsc`
     /// pair or an ld-decode luma `.tbc` + chroma `.tbc` pair. Sidecar
     /// resolution follows [`Video::open_composite`].
     pub fn open_yc(

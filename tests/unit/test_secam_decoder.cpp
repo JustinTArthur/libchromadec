@@ -865,7 +865,7 @@ int checkCvbsDecode(chd_video_t *video) {
 // SECAM over the CVBS composite path: stored under the byte-compatible PAL
 // preset at a NONSTANDARD signal state, declared SECAM at open time.
 int testCvbsComposite(const fs::path &dir) {
-    const std::string path = (dir / "gen.composite").string();
+    const std::string path = (dir / "gen.cvbs").string();
     {
         std::ofstream f(path, std::ios::binary);
         REQUIRE(f.good());
@@ -895,8 +895,8 @@ int testCvbsComposite(const fs::path &dir) {
 // SECAM over the CVBS .y/.c pair: the .c holds the FM block oscillating
 // about the centred-chroma zero; the reader recombines a composite.
 int testCvbsYcPair(const fs::path &dir) {
-    const std::string yPath = (dir / "gen.y").string();
-    const std::string cPath = (dir / "gen.c").string();
+    const std::string yPath = (dir / "gen.cvbsy").string();
+    const std::string cPath = (dir / "gen.cvbsc").string();
     {
         std::ofstream fy(yPath, std::ios::binary);
         std::ofstream fc(cPath, std::ios::binary);

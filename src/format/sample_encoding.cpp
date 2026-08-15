@@ -10,7 +10,7 @@ static constexpr SampleEncodingPreset PRESETS[] = {
     { SampleEncoding::CVBS_U10_4FSC,    "CVBS_U10_4FSC",    2, true,  true  },
     { SampleEncoding::CVBS_U16_4FSC,    "CVBS_U16_4FSC",    2, false, true  },
     { SampleEncoding::CVBS_TPG21_4FSC,  "CVBS_TPG21_4FSC",  2, true,  true  },
-    { SampleEncoding::CVBS_S16_FSC,     "CVBS_S16_FSC",     2, true,  true  },
+    { SampleEncoding::CVBS_S16_4FSC,    "CVBS_S16_4FSC",    2, true,  true  },
     { SampleEncoding::RAW_S16_28M,      "RAW_S16_28M",      2, true,  false },
     { SampleEncoding::RAW_S16_40M,      "RAW_S16_40M",      2, true,  false },
 };
@@ -18,10 +18,22 @@ static constexpr SampleEncodingPreset PRESETS[] = {
 // TPG21 hardware offset (spec sample-encoding-presets.md): int16 = (val10 - 508) × 64.
 static constexpr int32_t TPG21_OFFSET_10B = 508;
 
+// Preset names that changed spelling in the spec, mapped to their current
+// name. The rename was purely editorial: word format, offset and scale, and
+// the YC chroma centring are all identical either side of it.
+static constexpr struct { const char *legacy; SampleEncoding encoding; } LEGACY_NAMES[] = {
+    // Spelled without the `4` until spec v1.4.0, which renamed it for
+    // consistency with the other 4fsc presets without bumping user_version.
+    { "CVBS_S16_FSC", SampleEncoding::CVBS_S16_4FSC },
+};
+
 const SampleEncodingPreset *findSampleEncodingByName(const std::string &name)
 {
     for (const auto &preset : PRESETS) {
         if (name == preset.name) return &preset;
+    }
+    for (const auto &alias : LEGACY_NAMES) {
+        if (name == alias.legacy) return &getSampleEncoding(alias.encoding);
     }
     return nullptr;
 }
@@ -56,7 +68,7 @@ uint16_t convertCompositeSampleToCanonical(SampleEncoding encoding, int16_t raw,
             if (centered > 65535) return 65535;
             return static_cast<uint16_t>(centered);
         }
-        case SampleEncoding::CVBS_S16_FSC: {
+        case SampleEncoding::CVBS_S16_4FSC: {
             // int16 = (val10 - blanking10) × 32; recover val10 × 64 =
             // int16 × 2 + blanking10 × 64.
             const int32_t scaled = static_cast<int32_t>(raw) * 2 + blanking10 * 64;
@@ -107,7 +119,7 @@ int16_t convertChromaSampleToCenteredCanonical(SampleEncoding encoding, int16_t 
             if (centered > INT16_MAX) return INT16_MAX;
             return static_cast<int16_t>(centered);
         }
-        case SampleEncoding::CVBS_S16_FSC: {
+        case SampleEncoding::CVBS_S16_4FSC: {
             // int16 = (val10 - blanking10) × 32 with chroma centred at
             // val10 = 512; excursion × 64 = int16 × 2 + (blanking10 - 512) × 64.
             const int32_t centered =

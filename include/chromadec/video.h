@@ -13,7 +13,7 @@ chd_status_t chd_init(void);
 void         chd_shutdown(void);
 
 /* Open a single-file composite capture: an ld-decode `.tbc` or a CVBS
- * `.composite`. The parameters the raw samples omit come from a metadata
+ * `.cvbs`. The parameters the raw samples omit come from a metadata
  * sidecar file next to the data. metadata_path_or_null:
  *   - NULL  → library auto-locates the sidecar next to path: an ld-decode
  *             `<path>.db` / `<path>.json`, else a CVBS `<basename>.meta`
@@ -32,7 +32,7 @@ chd_status_t chd_video_open_composite(const char *path,
                                       const chd_video_params_t *override_or_null,
                                       chd_video_t **out);
 
-/* Open a dual-file Y/C capture: a CVBS `.y` + `.c` pair, or a vhs-decode
+/* Open a dual-file Y/C capture: a CVBS `.cvbsy` + `.cvbsc` pair, or a vhs-decode
  * luma `.tbc` + chroma `.tbc` pair. The luma plane is decoded for Y and the
  * chroma plane for U/V, then merged. Sidecar resolution and flavour detection
  * follow chd_video_open_composite. metadata_path_or_null applies to the luma

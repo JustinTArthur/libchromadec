@@ -27,7 +27,7 @@ enum class SampleEncoding {
     CVBS_U10_4FSC = 0,   // signed int16, 10-bit values 0..1023 stored directly
     CVBS_U16_4FSC,       // unsigned int16, 10-bit values shifted left 6 bits (×64)
     CVBS_TPG21_4FSC,     // signed int16 with TPG21 offset: int16 = (val10 - 508) × 64
-    CVBS_S16_FSC,        // signed int16, blanking-centred: int16 = (val10 - blanking10) × 32
+    CVBS_S16_4FSC,       // signed int16, blanking-centred: int16 = (val10 - blanking10) × 32
     RAW_S16_28M,         // raw ADC at ~28.6 MHz, signed int16 full range
     RAW_S16_40M,         // raw ADC at 40 MHz, signed int16 full range
 };
@@ -52,6 +52,11 @@ struct SampleEncodingPreset {
 // Look up by name (uppercase ASCII, exact match). Returns nullptr if
 // unrecognised; an unrecognised preset MUST NOT be silently interpreted
 // (spec §4.2).
+//
+// The pre-spec-v1.4.0 spelling `CVBS_S16_FSC` resolves to CVBS_S16_4FSC. The
+// rename carried no semantic change, and the schema's user_version did not
+// move with it (it was 10 both before and after), so the sidecar itself
+// cannot say which spelling to expect.
 const SampleEncodingPreset *findSampleEncodingByName(const std::string &name);
 
 // Look up by enum.
@@ -63,7 +68,7 @@ const SampleEncodingPreset &getSampleEncoding(SampleEncoding encoding);
 // reject them via signal-state checking.
 //
 // blanking10 is the Video Standard Preset's 10-bit blanking level; only
-// CVBS_S16_FSC consumes it (its stored offset is standard-derived, 256 for
+// CVBS_S16_4FSC consumes it (its stored offset is standard-derived, 256 for
 // PAL and 240 for NTSC/PAL_M, unlike TPG21's fixed device constant).
 //
 // For luma samples in YC files, the same function is used (luma uses the

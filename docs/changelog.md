@@ -30,13 +30,13 @@ that heritage.
   MIGraphX, and the CoreML execution provider) and, on macOS, a native CoreML
   backend that reaches the GPU for models the ORT CoreML provider pushes back to
   the CPU. Either backend builds without the other.
-- **CVBS file format support** (specification v1.1.0): `.composite` and `.y`/`.c`
+- **CVBS file format support** (specification v1.5.0): `.cvbs` and `.cvbsy`/`.cvbsc`
   sources, the `.meta` metadata sidecar file, the field-raster and frame-native container
   layouts, and the sample encodings for PAL, NTSC, and PAL-M. Field phase and row
   alignment are measured from the signal, since the sidecar schema records
   neither.
 - **Dual-file Y/C input** (`chd_video_open_yc`) for S-Video and colour-under
-  captures, as a luma plus chroma `.tbc` pair or a CVBS `.y`/`.c` pair. Each
+  captures, as a luma plus chroma `.tbc` pair or a CVBS `.cvbsy`/`.cvbsc` pair. Each
   plane is decoded on its own and the components merged, with no composite
   reconstruction.
 - **Float output.** `yuv444ps`, `yuv440ps`, `grays`, and `rgbs` carry the
@@ -44,13 +44,6 @@ that heritage.
   `rgbs` and `rgb48` are matrixed straight from the component signals with no
   intermediate integer step. `CHD_OPT_OUTPUT_CLAMP` selects the legal-range box,
   if any, to hold the output to.
-- **Chroma filter modes** (`CHD_OPT_CHROMA_FILTER`), spanning NTSC and PAL: the
-  legacy widths, equiband (SMPTE ST 170 / ITU-R BT.1700), colour-under
-  (IEC 60774-1), and single-sideband recovery for wideband-I NTSC-1953 and
-  vestigial-sideband PAL. The NTSC-1953 path is backed by a sideband
-  calibration API (`<chromadec/calibration.h>`) that measures a capture's
-  vestigial rolloff and synthesizes the matching I equalizer and Q crosstalk
-  nuller.
 - **Dropout reporting without decoding.** `chd_decoder_get_dropout_spans` and
   `chd_decode_dropout_mask` hand back the detected dropouts, as spans or as a
   mask plane, with no chroma decode run at all.
@@ -73,7 +66,7 @@ integration:
 - Output padding is off by default (`padding_multiple` = 1, was 8).
 - Output is unclamped by default. The old BT.601 video-allowed clamp is now
   opt-in via `output_clamp = "legal_ycbcr_bt601"`.
-- CVBS sample levels follow the CVBS file format specification v1.1.0 (PAL black
+- CVBS sample levels follow the CVBS file format specification v1.5.0 (PAL black
   at blanking, NTSC and PAL-M with the 7.5 IRE setup), which shifts decoded luma
   levels for CVBS sources. `.tbc` sources read their levels from their own
   sidecar and are unaffected.

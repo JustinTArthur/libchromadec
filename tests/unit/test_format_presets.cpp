@@ -58,6 +58,9 @@ int testSampleEncodingLookup() {
     REQUIRE(findSampleEncodingByName("CVBS_TPG21_4FSC")->encoding == SampleEncoding::CVBS_TPG21_4FSC);
     REQUIRE(findSampleEncodingByName("RAW_S16_28M")->encoding == SampleEncoding::RAW_S16_28M);
     REQUIRE(findSampleEncodingByName("RAW_S16_40M")->encoding == SampleEncoding::RAW_S16_40M);
+    REQUIRE(findSampleEncodingByName("CVBS_S16_4FSC")->encoding == SampleEncoding::CVBS_S16_4FSC);
+    // Pre-spec-v1.4.0 spelling of the same encoding.
+    REQUIRE(findSampleEncodingByName("CVBS_S16_FSC")->encoding == SampleEncoding::CVBS_S16_4FSC);
     REQUIRE(findSampleEncodingByName("does-not-exist") == nullptr);
 
     REQUIRE(getSampleEncoding(SampleEncoding::CVBS_U10_4FSC).hasStandardAmplitudeMapping);
@@ -67,7 +70,7 @@ int testSampleEncodingLookup() {
 
 int testSampleConversion() {
     using namespace chd::format;
-    // Only CVBS_S16_FSC consumes the blanking argument; pass the PAL value
+    // Only CVBS_S16_4FSC consumes the blanking argument; pass the PAL value
     // (256) for the others to prove it is ignored.
     // CVBS_U10_4FSC: raw is 10-bit value; × 64 to get canonical TBC domain.
     REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_U10_4FSC, 256, 256) == 16384);
@@ -82,14 +85,14 @@ int testSampleConversion() {
     REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_TPG21_4FSC, -16128, 256) == 16384);
     REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_TPG21_4FSC, 0, 256) == 32512);  // val10 = 508
 
-    // CVBS_S16_FSC: int16 = (val10 - blanking10) × 32; the offset follows the
+    // CVBS_S16_4FSC: int16 = (val10 - blanking10) × 32; the offset follows the
     // standard's blanking (spec encoded-level examples).
-    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_FSC, 0, 256) == 16384);
-    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_FSC, -8064, 256) == 4 * 64);
-    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_FSC, 18816, 256) == 844 * 64);
-    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_FSC, 0, 240) == 15360);
-    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_FSC, 1344, 240) == 282 * 64);
-    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_FSC, 17920, 240) == 800 * 64);
+    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_4FSC, 0, 256) == 16384);
+    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_4FSC, -8064, 256) == 4 * 64);
+    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_4FSC, 18816, 256) == 844 * 64);
+    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_4FSC, 0, 240) == 15360);
+    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_4FSC, 1344, 240) == 282 * 64);
+    REQUIRE(convertCompositeSampleToCanonical(SampleEncoding::CVBS_S16_4FSC, 17920, 240) == 800 * 64);
 
     // Chroma centred at 512 → centred excursion × 64.
     REQUIRE(convertChromaSampleToCenteredCanonical(SampleEncoding::CVBS_U10_4FSC, 512, 256) == 0);
@@ -100,11 +103,11 @@ int testSampleConversion() {
     REQUIRE(convertChromaSampleToCenteredCanonical(SampleEncoding::CVBS_U16_4FSC,
                                                    static_cast<int16_t>(32768), 256) == 0);
 
-    // CVBS_S16_FSC chroma: zero maps to (512 - blanking10) × 32 in int16
+    // CVBS_S16_4FSC chroma: zero maps to (512 - blanking10) × 32 in int16
     // (8192 for PAL, 8704 for NTSC/PAL_M, per the spec examples).
-    REQUIRE(convertChromaSampleToCenteredCanonical(SampleEncoding::CVBS_S16_FSC, 8192, 256) == 0);
-    REQUIRE(convertChromaSampleToCenteredCanonical(SampleEncoding::CVBS_S16_FSC, 8704, 240) == 0);
-    REQUIRE(convertChromaSampleToCenteredCanonical(SampleEncoding::CVBS_S16_FSC,
+    REQUIRE(convertChromaSampleToCenteredCanonical(SampleEncoding::CVBS_S16_4FSC, 8192, 256) == 0);
+    REQUIRE(convertChromaSampleToCenteredCanonical(SampleEncoding::CVBS_S16_4FSC, 8704, 240) == 0);
+    REQUIRE(convertChromaSampleToCenteredCanonical(SampleEncoding::CVBS_S16_4FSC,
                                                    8192 + 88 * 32, 256) == 88 * 64);
     return 0;
 }

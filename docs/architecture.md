@@ -12,7 +12,7 @@ opaque handles, the `chd_status_t` return-code enum, and a thread-local
 last-error string (`chd_last_error`). Every public symbol is prefixed `chd_`.
 `chromadec.h` is the umbrella header; callers may also include the individual
 headers (`errors.h`, `log.h`, `types.h`, `video.h`, `decoder.h`, `frame.h`,
-`nn.h`, `dropout.h`, `calibration.h`, `pipeline.h`).
+`nn.h`, `dropout.h`, `pipeline.h`).
 
 Failures and diagnostics travel separate channels, and the library owns no
 console of its own. A failure comes back on the return path, as a
@@ -38,8 +38,8 @@ is no Qt anywhere.
 Module layout under `src/`:
 
 - `reader/`: source readers behind a single `ISource` interface: ld-decode
-  `.tbc` (with `.tbc.db` / `.tbc.json` metadata sidecars), CVBS `.composite`, and
-  dual-file YC (`.y` + `.c`, or luma + chroma `.tbc`).
+  `.tbc` (with `.tbc.db` / `.tbc.json` metadata sidecars), CVBS `.cvbs`, and
+  dual-file YC (`.cvbsy` + `.cvbsc`, or luma + chroma `.tbc`).
 - `metadata/`, `format/`: sidecar parsing and source-format detection.
 - `decoders/`: the decoder implementations, the decoder registry, the
   cross-system chroma filter, and shared FIR/IIR filter helpers.

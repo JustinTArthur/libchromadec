@@ -2,11 +2,12 @@
 //
 // CVBS metadata sidecar reader (`<basename>.meta`).
 //
-// Reads the single-table `cvbs_file` schema defined in the CVBS file format
-// specification (cvbs-file-format-specification/docs/index.md, user_version
-// = 7 or 8). The reader validates the preset triple against the format/ DATA
-// tables and returns the resolved presets along with file-level fields like
-// `number_of_sequential_frames` and `black_level`.
+// Reads the `cvbs_file` table defined in the CVBS file format specification
+// (cvbs-file-format-specification/docs/index.md, user_version 7 to 10). The
+// reader validates the preset triple against the format/ DATA tables and
+// returns the resolved presets along with file-level fields like
+// `number_of_sequential_frames` and `black_level`. Audio metadata (a sibling
+// table from user_version 9 on) is not read.
 
 #ifndef CHD_METADATA_CVBS_METADATA_SQLITE_H
 #define CHD_METADATA_CVBS_METADATA_SQLITE_H

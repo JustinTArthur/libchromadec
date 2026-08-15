@@ -31,7 +31,7 @@ typedef CHD_ENUM(chd_sample_encoding) {
     CHD_ENC_CVBS_U10_4FSC,
     CHD_ENC_CVBS_U16_4FSC,
     CHD_ENC_CVBS_TPG21_4FSC,
-    CHD_ENC_CVBS_S16_FSC,
+    CHD_ENC_CVBS_S16_4FSC,
     CHD_ENC_RAW_S16_28M,
     CHD_ENC_RAW_S16_40M
 } chd_sample_encoding_t;

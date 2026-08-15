@@ -4,7 +4,7 @@ libchromadec reads two families of composite-video capture: the ld-decode
 **`.tbc`** format, and the **CVBS file format**. This page describes both and
 maps each to the right opening function. The opening functions are named by
 signal layout (composite vs Y/C), not by which family the file came from: an
-ld-decode `.tbc` and a CVBS `.composite` both open with `chd_video_open_composite`.
+ld-decode `.tbc` and a CVBS `.cvbs` both open with `chd_video_open_composite`.
 
 ## Reader matrix
 
@@ -12,8 +12,8 @@ ld-decode `.tbc` and a CVBS `.composite` both open with `chd_video_open_composit
 |---|---|---|---|
 | `capture.tbc` | [`chd_video_open_composite`](api-reference.md#chd_video_open_composite) | `capture.tbc.db` (SQLite) or `capture.tbc.json` | ld-decode output. Composite, time-base-corrected. |
 | `luma.tbc` + `chroma.tbc` | [`chd_video_open_yc`](api-reference.md#chd_video_open_yc) | `luma.tbc.db` + `chroma.tbc.db` | vhs-decode Y/C-separated pair (e.g. S-Video). Decoded per plane, then merged. |
-| `capture.composite` | [`chd_video_open_composite`](api-reference.md#chd_video_open_composite) | `capture.meta` (SQLite) | CVBS single-file composite. |
-| `capture.y` + `capture.c` | [`chd_video_open_yc`](api-reference.md#chd_video_open_yc) | `capture.meta` (SQLite) | CVBS dual-file luma/chroma pair. |
+| `capture.cvbs` | [`chd_video_open_composite`](api-reference.md#chd_video_open_composite) | `capture.meta` (SQLite) | CVBS single-file composite. |
+| `capture.cvbsy` + `capture.cvbsc` | [`chd_video_open_yc`](api-reference.md#chd_video_open_yc) | `capture.meta` (SQLite) | CVBS dual-file luma/chroma pair. |
 
 In every case the **sample data and the metadata live in separate files**: the
 data file is a bare stream of samples with no header, and all the information
@@ -165,7 +165,7 @@ to the authoritative source:
 
 !!! info "Authoritative specification"
     The CVBS File Format Specification is published at
-    **[simoninns.github.io/cvbs-file-format-specification](https://simoninns.github.io/cvbs-file-format-specification)**.
+    **[decode-orc.github.io/cvbs-file-format-specification](https://decode-orc.github.io/cvbs-file-format-specification)**.
     Treat it as the source of truth; the summary here is orientation only.
 
 ### Shape of the format
@@ -180,8 +180,8 @@ described by one choice on each axis rather than a single monolithic mode:
 
 It defines **two file layouts**:
 
-- **Composite** (`.composite`): a single file carrying the full CVBS signal.
-- **Dual-file Y/C** (`.y` + `.c`): luma and chroma in separate files, for
+- **Composite** (`.cvbs`): a single file carrying the full CVBS signal.
+- **Dual-file Y/C** (`.cvbsy` + `.cvbsc`): luma and chroma in separate files, for
   S-Video-style sources where the two are already separated.
 
 Metadata lives in a **`.meta` SQLite sidecar** (the specification pins the
@@ -196,7 +196,7 @@ burst-lock semantics do not apply there) and declared SECAM at open time
 with `chd_video_params_t.standard = CHD_STD_SECAM`. That declaration selects
 the PAL lattice for geometry and re-declares the colour standard over it;
 with a `.meta` sidecar present, the sidecar's preset must be `PAL`. In a
-dual-file Y/C pair the `.c` file holds the SECAM FM block oscillating about
+dual-file Y/C pair the `.cvbsc` file holds the SECAM FM block oscillating about
 the centred-chroma zero, the same convention QAM chroma uses.
 
 ### Container layouts
@@ -300,11 +300,17 @@ in the document above; in brief:
 | `U16_4FSC` | Unsigned 16-bit, 4×f<sub>SC</sub>. Same packing the `.tbc` format uses. |
 | `U10_4FSC` | Unsigned 10-bit, 4×f<sub>SC</sub>. |
 | `TPG21_4FSC` | Test-pattern-generator encoding at 4×f<sub>SC</sub> (fixed device offset 508, ×64). |
-| `S16_FSC` | Signed 16-bit, blanking-centred at ×32 scale; the offset follows the standard's blanking level (256 PAL, 240 NTSC/PAL-M). |
+| `S16_4FSC` | Signed 16-bit, blanking-centred at ×32 scale; the offset follows the standard's blanking level (256 PAL, 240 NTSC/PAL-M). |
 | `S16_28M` / `S16_40M` | Signed 16-bit raw composite at 28.6 MHz / 40 MHz sample rates. |
 
-The `.meta` reader accepts schema `user_version` 7 and 8 (8 added `S16_FSC`
-and the `audio_locked` column).
+`S16_4FSC` was spelled `S16_FSC` before specification v1.4.0. Both names read,
+and both give you `CHD_ENC_CVBS_S16_4FSC`: the rename carried no change to the
+encoding, and it did not bump the schema version, so a sidecar cannot say which
+spelling it will use.
+
+The `.meta` reader accepts schema `user_version` 7 through 10. Those revisions
+differ only in how they carry audio metadata, which the reader does not read;
+the `cvbs_file` columns it does read are identical across all four.
 
 When metadata is absent or you need to force parameters, both CVBS open
 functions accept a

@@ -23,7 +23,6 @@
 #include <vector>
 
 #include "../common/error_state.h"
-#include "../decoders/chroma_filter.h"
 #include "../decoders/registry.h"
 #include "../decoders/source_field.h"
 #include "../dropout/dropout_corrector.h"
@@ -648,79 +647,6 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
         if (is440 && outCfg.outputY4m) {
             chd::detail::set_last_error(
                 "chd_decoder_commit: output_y4m_headers does not support 4:4:0 output");
-            return CHD_E_INVALID_ARG;
-        }
-    }
-    {
-        // Resolve the chroma-filter intent against the source system and reject
-        // invalid (mode, system) cells here, where the system is known. The
-        // registry's per-decoder config build trusts this gate.
-        auto it = d->optionMaps.str.find(CHD_OPT_CHROMA_FILTER);
-        std::optional<chd::decoders::ChromaFilter> intent;
-        if (it != d->optionMaps.str.end()) {
-            intent = chd::decoders::parseChromaFilter(it->second);
-            if (!intent) {
-                chd::detail::set_last_error(
-                    "chd_decoder_commit: unknown chroma_filter \"" + it->second + "\"");
-                return CHD_E_INVALID_ARG;
-            }
-            if (system == chd::metadata::SECAM) {
-                // The chroma-filter intents shape QAM subcarrier
-                // reconstruction; SECAM's FM block has no such cell.
-                chd::detail::set_last_error(
-                    "chd_decoder_commit: chroma_filter does not apply to SECAM decodes");
-                return CHD_E_INVALID_ARG;
-            }
-            const auto res = chd::decoders::resolveChromaFilter(*intent, system);
-            if (!res.valid) {
-                chd::detail::set_last_error(
-                    std::string("chd_decoder_commit: chroma_filter=\"") + it->second
-                    + "\": " + res.invalidReason);
-                return CHD_E_INVALID_ARG;
-            }
-        }
-        const bool isVsb = intent && *intent == chd::decoders::ChromaFilter::EquibandVsb;
-        const bool isSsb = intent && *intent == chd::decoders::ChromaFilter::WidebandISSB;
-
-        // The upper-sideband cutoff (+X) is consumed only by the PAL vestige
-        // recovery. Reject it elsewhere rather than silently ignoring it. (The
-        // NTSC wideband_i_ssb geometry is fixed by its built-in reconstruction
-        // filters; any asymmetry shaping comes from the sideband calibration
-        // profile, not this cutoff.)
-        auto xit = d->optionMaps.f64.find(CHD_OPT_CHROMA_UPPER_SIDEBAND_HZ);
-        const bool haveX = (xit != d->optionMaps.f64.end());
-        if (haveX && !isVsb) {
-            chd::detail::set_last_error(
-                "chd_decoder_commit: chroma_upper_sideband_hz is consumed only by "
-                "chroma_filter=\"equiband_vsb\"");
-            return CHD_E_INVALID_ARG;
-        }
-        if (haveX && (!std::isfinite(xit->second) || xit->second <= 0.0
-                      || xit->second >= chd::decoders::kEquibandCeilingHz)) {
-            chd::detail::set_last_error(
-                "chd_decoder_commit: chroma_upper_sideband_hz must be in (0, 1.3 MHz), "
-                "the upper-sideband room +X above the subcarrier");
-            return CHD_E_INVALID_ARG;
-        }
-        // equiband_vsb has no blind PAL β estimator and no single baked default,
-        // so the geometry must be supplied explicitly.
-        if (isVsb && !haveX) {
-            chd::detail::set_last_error(
-                "chd_decoder_commit: chroma_filter=\"equiband_vsb\" requires "
-                "chroma_upper_sideband_hz (the upper-sideband room +X above fSC, "
-                "e.g. 1066000 for System-I PAL)");
-            return CHD_E_INVALID_ARG;
-        }
-
-        // An ACTIVE β profile only has meaning in the NTSC SSB reconstruction;
-        // catching the mismatch here beats silently ignoring the profile.
-        // Inactive profiles (is_wideband_i == 0 or plateau == 0) are inert
-        // and allowed under any mode.
-        const auto &calib = d->optionMaps.sidebandCalib;
-        if (calib && calib->is_wideband_i != 0 && calib->beta_plateau > 0.0 && !isSsb) {
-            chd::detail::set_last_error(
-                "chd_decoder_commit: an active chroma sideband profile requires "
-                "chroma_filter=\"wideband_i_ssb\"");
             return CHD_E_INVALID_ARG;
         }
     }
