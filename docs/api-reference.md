@@ -1015,14 +1015,15 @@ clusters the measured per-line reference carriers into the two undeviated
 subcarriers and discriminates against the measured pair, absorbing converter
 offsets (an ME-SECAM deck's free-running conversion arithmetic) without
 assuming absolute carrier positions. The reference pair is measured on a
-bell-free band response: the inverse bell shapes noise asymmetrically around
-its centre and would bias the clustered medians toward each other. The calibration also recentres the
-chroma band and the inverse HF pre-correction bell on the measured pair:
+bell-free band response: the receiver's bell (cloche) network shapes noise
+asymmetrically around its centre and would bias the clustered medians toward
+each other. The calibration also recentres the chroma band and the bell, the
+inverse of the encoder's HF pre-correction (anti-bell), on the measured pair:
 a converter offset arises after encoding and translates the whole FM block,
-bell shaping included, so an inverse left at nominal would sit on the wrong
+anti-bell shaping included, so a bell left at nominal would sit on the wrong
 centre (measured on an ME-SECAM capture with carriers +108 kHz off nominal:
 colour-difference overshoot at large bar transitions drops from roughly
-twice the step to a few percent once the inverse follows the block). A field
+twice the step to a few percent once the bell follows the block). A field
 whose porch pair is unmeasurable reuses the last measured pair, since a
 converter offset is a property of the capture rather than the field; the
 nominal 4.25/4.40625 MHz subcarriers apply only until some field has

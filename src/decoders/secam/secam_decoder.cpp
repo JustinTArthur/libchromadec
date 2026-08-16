@@ -44,13 +44,14 @@ double bandGain(double f) {
     return 1.0;
 }
 
-// Closed-form inverse of the HF pre-correction ("bell", Table 4 item 10d):
+// The receiver's HF "bell" (cloche) network: the closed-form inverse of
+// the encoder's HF pre-correction (Table 4 item 10d, the "anti-bell"),
 // A_HFP(f) = (1 + j16F) / (1 + j1.26F), F = f/f0 - f0/f. First-order
 // networks invert exactly; evaluated at true analog frequencies. `centre`
 // is where the encoder's f0 sits in this capture: heterodyne converters
-// (VHS colour-under) translate the whole FM block, bell shaping included,
-// so the inverse must follow the measured carriers, not nominal.
-std::complex<double> inverseBell(double f, double centre) {
+// (VHS colour-under) translate the whole FM block, anti-bell shaping
+// included, so the bell must follow the measured carriers, not nominal.
+std::complex<double> bellNetwork(double f, double centre) {
     if (f <= 0.0) return {0.0, 0.0};
     const double F = f / centre - centre / f;
     const std::complex<double> num(1.0, 1.26 * F);
@@ -110,8 +111,8 @@ bool SecamDecoder::configure(const chd::metadata::LdDecodeMetaData::VideoParamet
     sampleRate = videoParameters.sampleRate;
 
     // Block geometry: power of two with at least 256 samples of context on
-    // each side of a row (the longest filter memory here is the inverse
-    // bell's ~16/(2*pi*f0) tail, well under a microsecond).
+    // each side of a row (the longest filter memory here is the bell
+    // network's ~16/(2*pi*f0) tail, well under a microsecond).
     blockSize = 1;
     while (blockSize < width + 512) blockSize <<= 1;
     margin = (blockSize - width) / 2;
@@ -188,8 +189,8 @@ bool SecamDecoder::configure(const chd::metadata::LdDecodeMetaData::VideoParamet
 
 // (Re)build the carrier-relative frequency masks with the FM block centred
 // at nominal + carrierOffset. Heterodyne converters translate the whole
-// block (bell shaping included), so the band, the inverse bell, and the
-// discriminator's mix-down all follow the measured carrier pair.
+// block (anti-bell shaping included), so the band, the bell network, and
+// the discriminator's mix-down all follow the measured carrier pair.
 void SecamDecoder::buildChromaMasks()
 {
     maskChroma.assign(blockSize, {0.0, 0.0});
@@ -203,11 +204,11 @@ void SecamDecoder::buildChromaMasks()
         else if (k < blockSize / 2)       analyticFactor = 2.0;
         const double fShifted = std::abs(f) - carrierOffset;
         maskChroma[k] = analyticFactor * bandGain(fShifted)
-                        * inverseBell(std::abs(f), kBellCentre + carrierOffset);
+                        * bellNetwork(std::abs(f), kBellCentre + carrierOffset);
         // Bell-free analytic band: its real part is the plain band-filtered
         // signal (the analytic factor restores the Hermitian half exactly),
         // and the complex signal is the calibration reference. Keeping the
-        // bell out of this path matters: the bell inverse shapes noise and
+        // bell out of this path matters: the bell network shapes noise and
         // switch transients asymmetrically around its centre, which biases
         // the discriminated porch medians and ties them to the mask state.
         maskBand[k] = analyticFactor * bandGain(fShifted);
@@ -363,7 +364,7 @@ void SecamDecoder::decodeField(const SourceField &inputField,
 
     // Filter, discriminate, and calibrate; when the measured carrier pair
     // shows the FM block sits away from where the masks were built (VHS
-    // colour-under converters translate the whole block, bell included),
+    // colour-under converters translate the whole block, anti-bell included),
     // recentre the masks on the measurement and redo the field once. The
     // porch measurement runs on the bell-free band path, where a steady
     // in-band carrier is untouched by mask recentring (only the distant band

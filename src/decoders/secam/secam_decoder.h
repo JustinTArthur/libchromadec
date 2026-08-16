@@ -4,8 +4,9 @@
 //
 // Decodes the SECAM FM chroma block (BT.1700 Part C / BT.470-6) from either
 // a separated chroma plane (vhs-decode Y/C TBC pair) or a composite signal:
-// block-FFT analytic signal with the closed-form inverse of the HF
-// pre-correction "bell" applied in the frequency domain, a designed
+// block-FFT analytic signal with the receiver's HF "bell" (cloche) network,
+// the closed-form inverse of the encoder's anti-bell pre-correction, applied
+// in the frequency domain, a designed
 // differentiating-FIR discriminator, per-field carrier calibration and
 // Db/Dr line identification from the back-porch reference carriers (measured
 // on a bell-free band response so the bell's noise shaping cannot bias the
@@ -134,7 +135,7 @@ private:
     fftw_plan inversePlan = nullptr;
 
     // Frequency-domain masks, one value per FFT bin.
-    std::vector<std::complex<double>> maskChroma;  // analytic x band x inverse bell
+    std::vector<std::complex<double>> maskChroma;  // analytic x band x bell network
     std::vector<double> maskBand;                  // analytic x band (bell-free reference)
     std::vector<std::complex<double>> maskDeemphasis;  // inverse LF pre-correction
 
@@ -161,7 +162,7 @@ private:
 
     // Per-field scratch, sized width*height. The `Ref` pair is the bell-free
     // band path feeding carrier calibration and line identification; the
-    // bell-inverted pair feeds the picture demodulation.
+    // bell-filtered pair feeds the picture demodulation.
     std::vector<std::complex<double>> analytic;
     std::vector<std::complex<double>> analyticRef;
     std::vector<double> chromaRecon;

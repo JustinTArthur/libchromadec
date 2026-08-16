@@ -75,7 +75,7 @@ static constexpr VideoSystemDefaults secamDefaults {
     "SECAM",
     // SECAM carries FM chroma on two line-alternate subcarriers (fOB = 272*fH,
     // fOR = 282*fH), so no single subcarrier frequency exists; the reference
-    // frequency here is the HF pre-correction ("bell") centre f0 from
+    // frequency here is the HF pre-correction (anti-bell) centre f0 from
     // BT.1700 Part C Table 4. Raster geometry is shared with PAL.
     4286000.0,
     palDefaults.minActiveFrameLine,
