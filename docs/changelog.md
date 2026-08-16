@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-08-16
 
 First release. libchromadec extracts the chroma decoding from `ld-decode`'s
 `tools/` (`ld-chroma-decoder`, `ld-dropout-correct`, and the shared library) and

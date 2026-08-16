@@ -19,7 +19,7 @@ expose yet.
 
 ## Adding the dependency
 
-The crates are not published to crates.io yet; depend on them by path or git.
+Depend on the crates by path or git.
 
 ```toml
 [dependencies]

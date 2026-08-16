@@ -44,7 +44,9 @@ Only symbols matching `chd_*` are exported.
   version as the soversion.
 - macOS: enforced by `meson/chromadec.exports`. Mach-O has no symbol
   versioning, so this is a plain symbol list.
-- Windows: a `.def` file is added in a follow-up.
+- Windows: enforced by a `.def` file that `meson/gen-module-def.py` generates
+  from the public headers at build time. Nothing is exported without one, since
+  the sources carry no `__declspec(dllexport)`.
 
 Any new public function must:
 1. Have a name matching the `chd_*` pattern.

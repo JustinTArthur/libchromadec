@@ -8,11 +8,9 @@ luma_sep) together in one place.
 
 ## Status
 
-Near first 0.1.0 release. The C ABI is implemented and the library decodes.
-The ABI is **not frozen until that tag**, so treat the current `main` as
-movable. From 0.1.0 on, the rules in
-[docs/abi-stability.md](docs/abi-stability.md) apply: pre-1.0 the ABI breaks at
-the minor, and the soname moves with it.
+0.1.0 is the first release. The C ABI is implemented, the library decodes, and
+the rules in [docs/abi-stability.md](docs/abi-stability.md) apply from here on:
+pre-1.0 the ABI breaks at the minor, and the soname moves with it.
 
 ## What it decodes
 
