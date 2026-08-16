@@ -28,7 +28,7 @@ option('with_debug_overlay',
 
 option('onnxruntime_root',
        type: 'string', value: '',
-       description: 'ONNX Runtime install prefix, taken ahead of pkg-config and CMake discovery rather than as a fallback, since it names the exact copy to link. Accepts an unpacked Microsoft release archive (lib/ + include/), a restored classic NuGet package directory (runtimes/<rid>/native + build/native/include), or a restored Windows ML package directory (lib/native/<arch> + include/ + runtimes/<rid>/native); DirectML is published only in the last two. A root that resolves to neither is an error.')
+       description: 'ONNX Runtime install prefix, taken ahead of pkg-config and CMake discovery rather than as a fallback, since it names the exact copy to link. Accepts an unpacked Microsoft release archive (lib/ + include/), a restored classic NuGet package directory (runtimes/<rid>/native + build/native/include), or a restored Windows ML package directory (lib/native/<arch> + include/winml + runtimes/<rid>/native); DirectML is published only in the last two. A root that resolves to neither is an error.')
 
 option('rocm_root',
        type: 'string', value: '',
