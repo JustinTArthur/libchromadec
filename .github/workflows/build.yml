@@ -389,9 +389,10 @@ jobs:
           # DirectML.dll actually sitting next to onnxruntime.dll for the
           # delay-load to resolve. This leg builds against that package and
           # asserts the provider is really there. It does not pin the
-          # provider for the suite, because whether a GitHub runner's
-          # software adapter can carry an actual DirectML attach is unproven;
-          # the step that tries is allowed to fail.
+          # provider for the suite: a GitHub runner has no D3D12 adapter
+          # DirectML accepts (a pinned attach fails with C0262002, invalid
+          # display adapter handle), so a real attach is proven on hardware,
+          # not here.
           - arch: x64
             label: x64-directml
             runner: windows-2025
@@ -543,21 +544,6 @@ jobs:
           # CPU-only ONNX Runtime by accident fails instead of passing quietly.
           CHD_TEST_REQUIRE_ORT_PROVIDER: ${{ matrix.ort_source == 'nuget-windowsml' && '15' || '' }}
         run: meson test -C build --print-errorlogs
-
-      # Whether a GitHub runner's software D3D12 adapter can carry a DirectML
-      # attach is unproven, and worth learning, so pin the provider and let the
-      # answer be informational. Pinning is all or nothing — a provider that
-      # fails to attach is CHD_E_NN_BACKEND_UNAVAILABLE, not a silent CPU
-      # fallback — so a red step here means this runner has no usable adapter,
-      # not that the DirectML path is broken.
-      - name: Probe a real DirectML attach (informational)
-        if: matrix.ort_source == 'nuget-windowsml'
-        continue-on-error: true
-        shell: pwsh
-        env:
-          CHD_TEST_NN_BACKEND: '15'
-          CHD_TEST_EXPECT_NN_BACKEND: '15'
-        run: meson test -C build --print-errorlogs nn_framework nntransform3d ldzeug
 
       - name: Verify exported chd_* symbols
         shell: pwsh
