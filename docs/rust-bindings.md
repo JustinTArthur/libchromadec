@@ -23,7 +23,7 @@ The crates are not published to crates.io yet; depend on them by path or git.
 
 ```toml
 [dependencies]
-chromadec = { git = "https://github.com/JustinTArthur/chroma-decode", branch = "main" }
+chromadec = { git = "https://github.com/JustinTArthur/libchromadec", branch = "main" }
 ```
 
 `chromadec-sys` is pulled in transitively; you do not name it unless you call
@@ -61,8 +61,8 @@ on macOS, `PATH` on Windows) or link statically.
 cargo build
 
 # Against an in-tree Meson build, no install
-PKG_CONFIG_PATH=/path/to/chroma-decode/build/meson-uninstalled \
-  DYLD_LIBRARY_PATH=/path/to/chroma-decode/build/src \
+PKG_CONFIG_PATH=/path/to/libchromadec/build/meson-uninstalled \
+  DYLD_LIBRARY_PATH=/path/to/libchromadec/build/src \
   cargo run --example video_info -- capture.tbc
 ```
 

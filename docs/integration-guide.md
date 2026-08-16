@@ -192,7 +192,7 @@ Drop a `subprojects/chromadec.wrap` into your project:
 
 ```ini
 [wrap-git]
-url = https://github.com/JustinTArthur/chroma-decode
+url = https://github.com/JustinTArthur/libchromadec
 revision = main
 depth = 1
 ```
@@ -236,6 +236,122 @@ libchromadec builds both a shared object and a static archive
 (`default_library=both`), and Meson hands dependents the shared one by default.
 `-Ddefault_both_libraries=static` selects the archive instead, which is the
 usual choice when you are producing a single self-contained binary.
+
+## Packaging recipes
+
+The recipes below are what a packager, or an application bundling libchromadec
+through a package manager, needs beyond the linking lines above. Each one has
+been shaped so the consumer's own build system sees an ordinary installed copy:
+`chromadec.pc` for pkg-config and Meson, `chromadecConfig.cmake` for CMake.
+
+### Nix
+
+The repository is a flake. Its `overlays.default` adds a `libchromadec`
+attribute to **your** nixpkgs, so the library is built against your channel
+and your dependency overrides rather than a second copy of nixpkgs:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    chromadec = {
+      url = "github:JustinTArthur/libchromadec";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { self, nixpkgs, chromadec }:
+    let
+      system = "x86_64-linux";
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ chromadec.overlays.default ];
+      };
+    in {
+      packages.${system}.default = pkgs.stdenv.mkDerivation {
+        name = "my-consumer";
+        src = ./.;
+        nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
+        buildInputs = [ pkgs.libchromadec ];
+      };
+    };
+}
+```
+
+The derivation is multi-output: headers, `chromadec.pc` and the CMake config
+land in `dev`, the library in `out`. nixpkgs' CMake and pkg-config hooks find
+both, so `find_package(chromadec CONFIG REQUIRED)` and `dependency('chromadec')`
+work with no `_DIR` hint. On Linux the shared object carries an RPATH into the
+store for its own dependencies, so a consumer adds nothing for them.
+
+The inference backends are arguments on the derivation, so the same overlay
+covers every configuration:
+
+```nix
+# Classic decoders only: no ONNX Runtime in the closure.
+pkgs.libchromadec.override { onnxruntime = null; withCoreml = false; }
+
+# NN decoders against a Microsoft prebuilt ORT with the CUDA or CoreML
+# execution providers instead of nixpkgs' CPU-only build.
+pkgs.libchromadec.override { onnxruntime = myPrebuiltOrt; }
+
+# CUDA sideband decoding on x86_64-linux.
+pkgs.libchromadec.override { cudaSupport = true; cudaPackages = pkgs.cudaPackages; }
+```
+
+`onnxruntime` accepts either the multi-output nixpkgs package (found through
+pkg-config) or a single-prefix unpacked release archive (handed to
+`onnxruntime_root`); pass `onnxruntimeRoot` directly for a layout that fits
+neither. The flake also exports `packages.<system>.libchromadec`,
+`libchromadec-noml` and, on x86_64-linux, `libchromadec-cuda`, built against
+the flake's own nixpkgs pin, for a plain `nix build` without an overlay.
+
+### Flatpak
+
+A libchromadec module for an application manifest. Meson, CMake, Python and
+pkg-config all come from the freedesktop SDK the KDE and GNOME SDKs are based
+on, so the module needs no build tooling of its own:
+
+```yaml
+  - name: chromadec
+    buildsystem: meson
+    config-opts:
+      - -Dwith_onnxruntime=false
+      - -Dwith_coreml=disabled
+      - -Dwith_cuda=disabled
+      - -Dwith_rocm=disabled
+      - -Dwith_tests=false
+      - -Dwith_examples=false
+      - -Dwith_debug_overlay=false
+      - -Dpkgconfig.relocatable=false
+    sources:
+      - type: git
+        url: https://github.com/JustinTArthur/libchromadec.git
+        commit: <full commit sha, or a release tag once one exists>
+```
+
+Points that matter inside flatpak-builder's sandbox:
+
+- The build has no network. `dependency('sqlite3')` must find a system copy
+  (the freedesktop runtime ships `libsqlite3`, and many manifests build their
+  own module anyway); the bundled `sqlite3.wrap` fallback would try to fetch
+  and fail. **FFTW3** gates the Transform PAL decoders and has no fallback:
+  if the runtime you target does not carry it, add an `fftw` module (autotools,
+  `--enable-shared --enable-threads`) ahead of this one, or the decoders are
+  compiled out with only a line in the configure summary to say so.
+- The recipe above turns every inference backend off, which is what fits a
+  Flatpak: CoreML, CUDA and ROCm are not reachable from the sandbox, and there
+  is no established ONNX Runtime module. To ship the neural decoders, build ORT
+  as an earlier module and flip `with_onnxruntime` on.
+- The library installs to `/app/lib`, which the runtime's loader already
+  searches; no RPATH step is needed for the application binary.
+
+### vcpkg
+
+There is no port in the vcpkg registry yet; publishing one is tracked in
+[issue #21](https://github.com/JustinTArthur/libchromadec/issues/21). Until
+then, a vcpkg-manifest project can build libchromadec from a system install or,
+if it is a Meson project, as a subproject as described above.
 
 ## A minimal decode
 

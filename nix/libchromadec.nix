@@ -158,7 +158,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   meta = {
     description = "Composite video chroma decoding library";
-    homepage = "https://github.com/JustinTArthur/chroma-decode";
+    homepage = "https://github.com/JustinTArthur/libchromadec";
     license = lib.licenses.gpl3Plus;
     pkgConfigModules = [ "chromadec" ];
     platforms = lib.platforms.unix ++ lib.platforms.windows;

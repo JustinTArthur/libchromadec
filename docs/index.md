@@ -1,7 +1,7 @@
 # libchromadec documentation
 
 A shared library for decoding 4×fsc-sampled composite analog video (CVBS / TBC)
-into component Y'CbCr output.
+into component Y′ C′b C′r, E′Y E′Cb E′Cr, R′G′B′, or grayscale output.
 
 ## Contents
 

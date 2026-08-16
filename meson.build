@@ -341,9 +341,9 @@ endif
 pkg = import('pkgconfig')
 pkg.generate(libchromadec,
              name: 'chromadec',
-             description: 'chroma-decode: composite video chroma decoding library',
+             description: 'libchromadec: composite video chroma decoding library',
              version: meson.project_version(),
-             url: 'https://github.com/JustinTArthur/chroma-decode',
+             url: 'https://github.com/JustinTArthur/libchromadec',
              libraries_private: cxx_runtime_libs,
              # Advertise the link language for tooling that learns to consume it
              # (Meson custom-variable / pkgconf Link.ABI / CPS link_languages).

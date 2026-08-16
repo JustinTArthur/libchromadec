@@ -149,7 +149,7 @@ bool DecoderPool::process()
         }
     }
 
-    // Open the output file. Stdout is not supported here (chroma-decode
+    // Open the output file. Stdout is not supported here (libchromadec
     // is a library; the consumer can pipe a regular file path).
     if (outputFileName == "-") {
         chd::log::fail() << "Stdout output is not supported by libchromadec";

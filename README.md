@@ -1,7 +1,7 @@
-# chroma-decode (libchromadec)
+# libchromadec
 
 A library for decoding 4×fsc-sampled composite analog video (CVBS / TBC) into
-component Y′Cb′Cr′, E′Y E′Cb E′Cr or R′G′B′ video behind a stable C ABI. It
+component Y′ C′b C′r, E′Y E′Cb E′Cr or R′G′B′ video behind a stable C ABI. It
 brings the classical decoders (1D/2D/3D comb, PALcolour, Transform-PAL 2D/3D,
 SECAM) and the neural-network decoders (nnTransform3D, ldzeug2 color_cnn and
 luma_sep) together in one place.

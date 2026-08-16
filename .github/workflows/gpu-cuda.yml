@@ -113,7 +113,7 @@ jobs:
             --instance-market-options 'MarketType=spot' \
             --instance-initiated-shutdown-behavior terminate \
             --user-data "$USER_DATA" \
-            --tag-specifications "ResourceType=instance,Tags=[{Key=Project,Value=chroma-decode},{Key=Purpose,Value=ci-cuda},{Key=RunId,Value=${{ github.run_id }}},{Key=RunnerLabel,Value=${RUNNER_LABEL}}]" \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Project,Value=libchromadec},{Key=Purpose,Value=ci-cuda},{Key=RunId,Value=${{ github.run_id }}},{Key=RunnerLabel,Value=${RUNNER_LABEL}}]" \
             --query 'Instances[0].InstanceId' \
             --output text)
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
