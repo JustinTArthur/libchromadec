@@ -92,7 +92,7 @@ fftw3_dep   = dependency('fftw3',   required: false)
 # runtimes/<rid>/native (import library and DLL together) and
 # build/native/include. The Windows ML NuGet package
 # (Microsoft.Windows.AI.MachineLearning) splits further still: the import
-# library moves to lib/native/<arch>, headers move to a flat include/, and
+# library moves to lib/native/<arch>, headers move to include/winml, and
 # runtimes/<rid>/native keeps only the DLLs (onnxruntime.dll and DirectML.dll
 # bundled together, so this one form carries both without a second package to
 # restore). That third form is why each candidate below names its DLL
@@ -115,13 +115,16 @@ if get_option('with_onnxruntime') and ort_root != ''
                         ort_root / 'build' / 'native' / 'include',
                         ort_root / 'runtimes' / nuget_rid / 'native'],
                        [ort_root / 'lib' / 'native' / winml_arch,
-                        ort_root / 'include',
+                        ort_root / 'include' / 'winml',
                         ort_root / 'runtimes' / nuget_rid / 'native']]
     if fs.is_dir(candidate[0])
       ort_libdirs += candidate[0]
       ort_dlldirs += candidate[2]
     endif
-    if fs.is_dir(candidate[1])
+    # Probe for the header rather than the directory: the Windows ML package
+    # has an include/ too, holding its own WinML headers, and the ONNX Runtime
+    # ones live below it.
+    if fs.is_file(candidate[1] / 'onnxruntime_cxx_api.h')
       ort_incdirs += candidate[1]
     endif
   endforeach
@@ -140,7 +143,7 @@ if get_option('with_onnxruntime') and ort_root != ''
           'Expected the release-archive layout (lib/ + include/), the classic ' +
           'NuGet package layout (runtimes/' + nuget_rid + '/native + ' +
           'build/native/include), or the Windows ML NuGet package layout ' +
-          '(lib/native/' + winml_arch + ' + include/ + runtimes/' + nuget_rid +
+          '(lib/native/' + winml_arch + ' + include/winml + runtimes/' + nuget_rid +
           '/native). Pass a different root, drop the option to discover ORT ' +
           'via pkg-config or CMake, or set -Dwith_onnxruntime=false.')
   endif
