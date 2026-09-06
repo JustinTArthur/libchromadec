@@ -62,6 +62,9 @@ Module layout under `src/`:
   inverses of both Table 4 pre-corrections, a near-DC differentiating-FIR
   discriminator, and porch-calibrated carriers that recentre the band and
   bell masks on the measured pair; 4:4:0 output only.
+- HVD: holographic-variational Y/C separation through the bundled hvd-core
+  engine, 2D (woven frame) and 3D (field-granularity temporal); NTSC, PAL,
+  and PAL-M.
 - nnTransform3D: neural 3D decode, fronted by an FFT stage (see NN inference).
 - ldzeug2: color_cnn and luma_sep (per-field and per-frame), pure convolutional
   neural networks (CNNs).
@@ -94,4 +97,7 @@ decoder-specific code.
 Meson is the primary build. The library ships a pkg-config `.pc` file and a
 CMake package config, so CMake consumers can
 `find_package(chromadec CONFIG REQUIRED)`. Optional backends are gated by build
-options: `with_onnxruntime`, `with_cuda`, `with_rocm`, and `with_coreml`.
+options: `with_onnxruntime`, `with_cuda`, `with_rocm`, `with_coreml`, and
+`with_hvd` (the bundled hvd-core engine behind the `CHD_DEC_HVD_*` kinds), and
+`with_hvd_openmp` (OpenMP threading for that engine's solver loops, used where
+the toolchain provides a runtime).

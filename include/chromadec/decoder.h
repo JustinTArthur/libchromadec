@@ -25,14 +25,11 @@ typedef CHD_ENUM(chd_decoder_kind) {
     CHD_DEC_LDZEUG_LUMA_SEP   = 11,
     CHD_DEC_LDZEUG_LUMA_SEP_FRAME = 12,
     /* Geometry/metadata only: commit resolves the output framing but builds no
-     * chroma decode engines, and requires no NN model. chd_decode_frame is
-     * rejected with CHD_E_DECODER_INCOMPATIBLE; chd_decoder_get_output_info and the
-     * dropout span/mask queries work. For consumers that want dropout regions
-     * without paying for chroma decoding. */
+     * chroma decode engines, and requires no NN model. */
     CHD_DEC_NONE                  = 13,
-
-    /* Line-sequential FM chroma (SECAM family); output is 4:4:0. */
-    CHD_DEC_SECAM                 = 20
+    CHD_DEC_SECAM                 = 20,
+    CHD_DEC_HVD_2D                = 30,
+    CHD_DEC_HVD_3D                = 31
 } chd_decoder_kind_t;
 
 chd_status_t chd_decoder_create(chd_video_t *v, chd_decoder_kind_t kind, chd_decoder_t **out);
@@ -81,6 +78,8 @@ chd_status_t chd_decoder_get_output_info(const chd_decoder_t *d, chd_output_info
 #define CHD_OPT_LAST_ACTIVE_FRAME_LINE      "last_active_frame_line"    /* i32, inclusive, 0-indexed woven frame line */
 #define CHD_OPT_NN_INPUT_MAGNITUDE_SCALE    "nn_input_magnitude_scale"  /* f64 (nnTransform3D only) */
 #define CHD_OPT_NN_CHROMA_BANDPASS          "nn_chroma_bandpass"        /* bool (ldzeug2_luma_sep only) */
+#define CHD_OPT_HVD_CG_ITERATIONS           "hvd_cg_iterations"         /* i32 >= 0, HVD only: total conjugate-gradient budget across the solver's outer passes. 0 decodes with the holographic init alone; the default (2) favours speed, raise it when tuning for final quality */
+#define CHD_OPT_HVD_TEMPORAL_STRENGTH       "hvd_temporal_strength"     /* f64 >= 0, CHD_DEC_HVD_3D only: weight of the cross-field data terms. 0 (default) adapts per window to the measured Y/C ambiguity; a positive value forces that fixed strength */
 #define CHD_OPT_OUTPUT_FORMAT               "output_format"             /* str: "yuv444p16"|"yuv444ps"|"rgb48"|"rgbs"|"gray16"|"grays"|"yuv440p16"|"yuv440ps" */
 #define CHD_OPT_OUTPUT_CLAMP                "output_clamp"              /* str: "none"|"legal_rgb_sdr"|"legal_rgb_hdr"|"legal_ycbcr_bt601" */
 #define CHD_OPT_COLOR_DIFFERENCE_PRECISION  "color_difference_precision"  /* str: "classic"|"modern", default "modern" */

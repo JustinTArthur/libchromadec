@@ -25,8 +25,9 @@ pub enum DecoderKind {
     /// decoding is rejected, but output-info and dropout span/mask queries
     /// work.
     None,
-    /// Line-sequential FM chroma (SECAM family); output is 4:4:0.
     Secam,
+    Hvd2d,
+    Hvd3d,
 }
 
 impl DecoderKind {
@@ -47,6 +48,8 @@ impl DecoderKind {
             DecoderKind::LdzeugLumaSepFrame => sys::chd_decoder_kind::CHD_DEC_LDZEUG_LUMA_SEP_FRAME,
             DecoderKind::None => sys::chd_decoder_kind::CHD_DEC_NONE,
             DecoderKind::Secam => sys::chd_decoder_kind::CHD_DEC_SECAM,
+            DecoderKind::Hvd2d => sys::chd_decoder_kind::CHD_DEC_HVD_2D,
+            DecoderKind::Hvd3d => sys::chd_decoder_kind::CHD_DEC_HVD_3D,
         }
     }
 }

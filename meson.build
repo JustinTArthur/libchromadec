@@ -184,6 +184,36 @@ if has_sqlite and sqlite3_dep.type_name() == 'internal'
   sqlite3_whole = [subproject('sqlite3').get_variable('libsqlite3')]
 endif
 
+# hvd-core: vrunk11's holographic-variational Y/C separation engine, always
+# from the pinned wrap (upstream installs nothing and ships no pkg-config, so
+# there is no system copy to find). allow_fallback makes `auto` reach the wrap
+# instead of silently resolving to not-found.
+# with_hvd_openmp seeds the subproject's own `openmp` feature. default_options
+# only apply on a subproject's first configure, so changing it on an existing
+# build dir takes -Dhvd-core:openmp=... instead.
+hvd_openmp_opt = get_option('with_hvd_openmp')
+hvd_openmp_fwd = 'auto'
+if hvd_openmp_opt.enabled()
+  hvd_openmp_fwd = 'enabled'
+elif hvd_openmp_opt.disabled()
+  hvd_openmp_fwd = 'disabled'
+endif
+hvd_core_dep = dependency('hvd-core',
+                          required: get_option('with_hvd'),
+                          allow_fallback: true,
+                          default_options: {'openmp': hvd_openmp_fwd})
+has_hvd = hvd_core_dep.found()
+
+# Fold the engine's objects into libchromadec, like the bundled SQLite above:
+# the subproject's archive is not installed, so a consumer of the installed
+# static libchromadec must find them already inside it.
+hvd_core_whole = []
+has_hvd_openmp = false
+if has_hvd and hvd_core_dep.type_name() == 'internal'
+  hvd_core_whole = [subproject('hvd-core').get_variable('hvd_core_lib')]
+  has_hvd_openmp = subproject('hvd-core').get_variable('hvd_openmp_enabled')
+endif
+
 # ── CUDA toolkit discovery ────────────────────────────────────────────────────
 # When `with_cuda=auto` (the default), the build tries to find the CUDA
 # toolkit + cuFFT and silently falls back to the CPU FFTW path if either
@@ -398,6 +428,8 @@ summary({
   'HIP hipFFT pipeline (ROCm/MX)': has_rocm,
   'CoreML pipeline (macOS)':       has_coreml,
   'FFTW3 (Transform-PAL)':         has_fftw,
+  'hvd-core (HVD Y/C engine)':     has_hvd,
+  'hvd-core OpenMP loops':         has_hvd_openmp,
   'SQLite3 (metadata)':            has_sqlite,
   'Tests':                         get_option('with_tests'),
   'Examples':                      get_option('with_examples'),

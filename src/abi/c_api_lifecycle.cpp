@@ -76,6 +76,13 @@ int chd_has_feature(const char *feature) {
         return 0;
 #endif
     }
+    if (std::strcmp(feature, "hvd") == 0) {
+#if defined(CHD_WITH_HVD)
+        return 1;
+#else
+        return 0;
+#endif
+    }
     if (std::strcmp(feature, "sqlite") == 0) {
         // SQLite is a hard dependency; if we got here, it's on.
         return 1;

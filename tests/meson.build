@@ -82,6 +82,16 @@ test_secam_decoder = executable('test_secam_decoder',
 # it runs several times longer than the 30s meson default and was timing out.
 test('secam_decoder', test_secam_decoder, timeout: 300)
 
+# HVD bridge against a synthetic NTSC generator built from the engine's own
+# physical definitions; needs the hvd-core headers, so it exists only on a
+# build that has the engine.
+if has_hvd
+  test_hvd_decoder = executable('test_hvd_decoder',
+    'unit/test_hvd_decoder.cpp',
+    dependencies: [chromadec_internal_dep, hvd_core_dep])
+  test('hvd_decoder', test_hvd_decoder)
+endif
+
 # End-to-end pipeline sanity test.  Reaches into internal headers (the C ABI
 # for decode isn't wired up yet).
 test_encode_orc_color_bars = executable('test_encode_orc_color_bars',

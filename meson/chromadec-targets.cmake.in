@@ -103,7 +103,8 @@ if(EXISTS "${_chromadec_incdir}")
         INTERFACE_INCLUDE_DIRECTORIES "${_chromadec_incdir}")
 endif()
 
-# Deliberately no INTERFACE_LINK_LIBRARIES for sqlite3, fftw3 or ONNX Runtime.
+# Deliberately no INTERFACE_LINK_LIBRARIES for sqlite3, fftw3, the OpenMP
+# runtime, or ONNX Runtime.
 # Linking the shared library does not need them, and a consumer static-linking
 # chromadec needs the full private set that only chromadec.pc records; that
 # case should keep going through `pkg-config --static`.

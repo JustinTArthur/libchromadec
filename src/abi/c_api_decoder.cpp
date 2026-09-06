@@ -716,6 +716,29 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
         }
     }
 
+    {
+        // HVD solver budget: 0 (init-only decode) is meaningful, negative
+        // is not. -1 is the registry's internal keep-engine-default marker,
+        // so it must not arrive through the option surface.
+        auto it = d->optionMaps.i32.find(CHD_OPT_HVD_CG_ITERATIONS);
+        if (it != d->optionMaps.i32.end() && it->second < 0) {
+            chd::detail::set_last_error(
+                "chd_decoder_commit: hvd_cg_iterations must be >= 0 "
+                "(0 decodes with the holographic init alone)");
+            return CHD_E_INVALID_ARG;
+        }
+    }
+    {
+        auto it = d->optionMaps.f64.find(CHD_OPT_HVD_TEMPORAL_STRENGTH);
+        if (it != d->optionMaps.f64.end()
+            && (!std::isfinite(it->second) || it->second < 0.0)) {
+            chd::detail::set_last_error(
+                "chd_decoder_commit: hvd_temporal_strength must be >= 0 "
+                "(0 adapts to the measured Y/C ambiguity)");
+            return CHD_E_INVALID_ARG;
+        }
+    }
+
     chd::metadata::LdDecodeMetaData *meta = d->video->metadata.get();
     if (meta == nullptr) {
         chd::detail::set_last_error("chd_decoder_commit: failed to resolve video metadata");

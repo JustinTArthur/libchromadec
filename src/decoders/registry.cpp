@@ -18,6 +18,10 @@
 #include "ldzeug/ldzeug_luma_sep.h"
 #endif
 
+#if defined(CHD_WITH_HVD)
+#include "hvd/hvd_decoder.h"
+#endif
+
 namespace chd::decoders::registry {
 
 namespace {
@@ -117,10 +121,11 @@ bool optionApplies(chd_decoder_kind_t kind, const std::string &name, OptionType 
     const bool ldzeug = isLdzeugKind(kind);
     const bool nn3d   = kind == CHD_DEC_NN_TRANSFORM3D;
     const bool secam  = kind == CHD_DEC_SECAM;
+    const bool hvd    = kind == CHD_DEC_HVD_2D || kind == CHD_DEC_HVD_3D;
 
     // Comb / PAL chroma-trim options.
-    if (type == OptionType::F64 && name == CHD_OPT_CHROMA_GAIN)     return comb || pal || ldzeug || secam;
-    if (type == OptionType::F64 && name == CHD_OPT_CHROMA_PHASE_DEG) return comb || pal || ldzeug;
+    if (type == OptionType::F64 && name == CHD_OPT_CHROMA_GAIN)     return comb || pal || ldzeug || secam || hvd;
+    if (type == OptionType::F64 && name == CHD_OPT_CHROMA_PHASE_DEG) return comb || pal || ldzeug || hvd;
     if (type == OptionType::F64 && name == CHD_OPT_LUMA_NR_LEVEL) {
         return comb || pal || kind == CHD_DEC_MONO;
     }
@@ -153,6 +158,11 @@ bool optionApplies(chd_decoder_kind_t kind, const std::string &name, OptionType 
         return kind == CHD_DEC_TRANSFORM_2D || kind == CHD_DEC_TRANSFORM_3D;
     if (type == OptionType::Str && name == CHD_OPT_TRANSFORM_THRESHOLDS_FILE)
         return kind == CHD_DEC_TRANSFORM_2D || kind == CHD_DEC_TRANSFORM_3D;
+
+    // HVD solver budget and temporal weight.
+    if (type == OptionType::I32 && name == CHD_OPT_HVD_CG_ITERATIONS) return hvd;
+    if (type == OptionType::F64 && name == CHD_OPT_HVD_TEMPORAL_STRENGTH)
+        return kind == CHD_DEC_HVD_3D;
 
     // NN-specific options.
     if (type == OptionType::F64  && name == CHD_OPT_NN_INPUT_MAGNITUDE_SCALE) return nn3d;
@@ -295,6 +305,23 @@ std::unique_ptr<chd::decoders::Decoder> build(chd_decoder_kind_t kind, const Opt
         case CHD_DEC_LDZEUG_LUMA_SEP:
         case CHD_DEC_LDZEUG_LUMA_SEP_FRAME:
             return nullptr;  // NN disabled at build time
+#endif
+#if defined(CHD_WITH_HVD)
+        case CHD_DEC_HVD_2D:
+        case CHD_DEC_HVD_3D: {
+            chd::decoders::hvd::HvdDecoder::HvdConfiguration hc;
+            hc.chromaGain   = findOr(opts.f64, CHD_OPT_CHROMA_GAIN, hc.chromaGain);
+            hc.chromaPhase  = findOr(opts.f64, CHD_OPT_CHROMA_PHASE_DEG, hc.chromaPhase);
+            hc.cgIterations = findOr(opts.i32, CHD_OPT_HVD_CG_ITERATIONS, hc.cgIterations);
+            hc.temporal3d   = kind == CHD_DEC_HVD_3D;
+            hc.temporalStrength =
+                findOr(opts.f64, CHD_OPT_HVD_TEMPORAL_STRENGTH, hc.temporalStrength);
+            return std::make_unique<chd::decoders::hvd::HvdDecoder>(hc);
+        }
+#else
+        case CHD_DEC_HVD_2D:
+        case CHD_DEC_HVD_3D:
+            return nullptr;  // hvd-core engine not built in
 #endif
         case CHD_DEC_AUTO:
         default:

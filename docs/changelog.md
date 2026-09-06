@@ -4,6 +4,13 @@
 
 ### Added
 
+- **HVD decoders** (`CHD_DEC_HVD_2D`, `CHD_DEC_HVD_3D`) for NTSC, PAL, and
+  PAL-M: vrunk11's holographic-variational Y/C separator, from the bundled
+  `hvd-core` subproject. The 3D kind adds motion-compensated cross-field terms
+  over a frame of look-behind and look-ahead. Tune with
+  `CHD_OPT_HVD_CG_ITERATIONS` and `CHD_OPT_HVD_TEMPORAL_STRENGTH`; build with
+  `-Dwith_hvd` and `-Dwith_hvd_openmp` (both auto) and query with
+  `chd_has_feature("hvd")`.
 - `chd_video_open_yc` accepts `.tbcy` / `.tbcc` plane names, resolving their
   shared sidecar beside the `.tbc` base name.
 

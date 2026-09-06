@@ -1,0 +1,14 @@
+# vrunk11's HVD (holographic-variational) NTSC/PAL Y/C separation engine.
+# The monorepo's .gitmodules names a standalone vrunk11/hvd-core, but that
+# repository does not exist yet, so this pins the monorepo and the overlay
+# builds only its hvd-core/ subtree. Repoint once the split lands.
+[wrap-git]
+directory = hvd-core
+url = https://github.com/vrunk11/hvd-cvbs-decoding.git
+# v0.1.3.
+revision = b4eba863b53441ff49b3d196e74816d0c73f4f0c
+depth = 1
+patch_directory = hvd-core
+
+[provide]
+dependency_names = hvd-core

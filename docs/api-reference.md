@@ -156,8 +156,8 @@ int chd_has_feature(const char *feature);   /* 1 = compiled in, 0 = not */
 ```
 
 Query optional build features. Recognised names: `"nn"`, `"onnxruntime"`,
-`"coreml"`, `"cuda"`, `"rocm"`, `"fftw"`, `"sqlite"`. Returns `0` for `NULL` or
-any unknown name.
+`"coreml"`, `"cuda"`, `"rocm"`, `"fftw"`, `"hvd"`, `"sqlite"`. Returns `0` for
+`NULL` or any unknown name.
 
 `"nn"` reports whether the neural-decoder framework is present — true when *any*
 inference backend is built. The individual backends have their own flags:
@@ -887,6 +887,8 @@ default appropriate to the video standard.
 | `CHD_DEC_LDZEUG_LUMA_SEP` / `_FRAME`               | Neural luma separation (field / frame).     |
 | `CHD_DEC_NONE`                                     | Geometry/metadata only — no chroma decode.  |
 | `CHD_DEC_SECAM`                                    | SECAM line-sequential FM chroma (4:4:0 output). |
+| `CHD_DEC_HVD_2D`                                   | Holographic-variational Y/C separation (NTSC, PAL, PAL-M). |
+| `CHD_DEC_HVD_3D`                                   | HVD with motion-compensated temporal terms; 1 frame of look-behind and look-ahead. |
 
 `CHD_DEC_NONE` builds no chroma-decoding engine. Commit still resolves the
 output framing, so [`chd_decoder_get_output_info`](#chd_decoder_get_output_info)
@@ -981,6 +983,8 @@ and any decoder-kind restriction.
 | `CHD_OPT_LAST_ACTIVE_FRAME_LINE`    | i32  | Last active frame line (inclusive, 0-indexed woven — the line is included in the output).                                    |
 | `CHD_OPT_NN_INPUT_MAGNITUDE_SCALE`  | f64  | nnTransform3D input magnitude scale.                                                                                         |
 | `CHD_OPT_NN_CHROMA_BANDPASS`        | bool | ldzeug2 luma-sep chroma bandpass.                                                                                            |
+| `CHD_OPT_HVD_CG_ITERATIONS`         | i32  | HVD kinds only: total conjugate-gradient iterations across the solver's outer passes (default `2`, the fast setting; `0` decodes with the holographic init alone). See [HVD decoders](#hvd-decoders). |
+| `CHD_OPT_HVD_TEMPORAL_STRENGTH`     | f64  | `CHD_DEC_HVD_3D` only: cross-field data-term weight. `0` (default) adapts per window to the measured Y/C ambiguity; a positive value forces that fixed strength. See [HVD decoders](#hvd-decoders). |
 | `CHD_OPT_OUTPUT_FORMAT`             | str  | `"yuv444p16"`, `"yuv444ps"`, `"rgb48"`, `"rgbs"`, `"gray16"`, `"grays"`, `"yuv440p16"`, or `"yuv440ps"` (the 4:4:0 pair is SECAM-only; see [4:4:0 output](#440-output)). |
 | `CHD_OPT_OUTPUT_CLAMP`              | str  | `"none"` (default), `"legal_rgb_sdr"`, `"legal_rgb_hdr"`, or `"legal_ycbcr_bt601"`. See [Output clamping](#output-clamping). |
 | `CHD_OPT_COLOR_DIFFERENCE_PRECISION` | str | `"classic"` or `"modern"` (default). Precision of the luma matrix coefficients. See [Colour conversion precision](#colour-conversion-precision).   |
@@ -1100,6 +1104,29 @@ Each decoder applies the measurement where its pipeline allows:
 The measurement is per line from a single burst, so it corrects line-to-line
 phase error but not drift within a line. A line whose burst is too weak to
 measure keeps the nominal phase for that line.
+
+### HVD decoders { #hvd-decoders }
+
+The `CHD_DEC_HVD_*` kinds decode through the bundled hvd-core engine
+(vrunk11's holographic-variational separator, see
+[Attribution](attribution.md)): burst-locked carrier lock-in, holographic
+sideband reconstruction of the chroma phasor, then Y/C arbitration by an
+IRLS/conjugate-gradient solve. `CHD_DEC_HVD_3D` runs the engine's
+field-granularity temporal pipeline, whose motion-compensated cross-field
+terms adapt to the content's measured Y/C ambiguity
+(`CHD_OPT_HVD_TEMPORAL_STRENGTH` forces a fixed weight). Both kinds exist
+only when the library was built with the hvd-core subproject
+(`-Dwith_hvd`, default `auto`); on a build without it, commit fails with
+`CHD_E_DECODER_UNKNOWN`. The solver budget defaults to the engine's fast
+setting; raise `CHD_OPT_HVD_CG_ITERATIONS` when tuning for final quality.
+Builds with `-Dwith_hvd_openmp` (default `auto`) thread the solver loops
+with OpenMP, which mostly benefits single-frame latency; the win grows with
+the solver budget, since the FFT and lock-in stages stay single-threaded.
+
+HVD separates Y from C in the composite signal, so these kinds are meant for
+composite sources. Nothing rejects them on a Y/C pair (where they would
+decode the chroma plane), but there is no separation left to do and the
+solver's luma-coupled priors have no luma to work from.
 
 ### chd_decode_frame
 

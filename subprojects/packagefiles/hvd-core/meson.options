@@ -1,0 +1,3 @@
+option('openmp',
+       type: 'feature', value: 'auto',
+       description: 'Thread the engine solver loops with OpenMP where the toolchain provides it')

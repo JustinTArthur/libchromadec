@@ -14,6 +14,14 @@ option('with_coreml',
        type: 'feature', value: 'auto',
        description: 'Build native CoreML inference pipeline (macOS only; MLModel + MPSGraph FFT for nnTransform3D and ldzeug2)')
 
+option('with_hvd',
+       type: 'feature', value: 'auto',
+       description: 'Build the bundled hvd-core subproject (vrunk11\'s holographic-variational NTSC/PAL Y/C separation engine), fetched via the hvd-core wrap and linked statically')
+
+option('with_hvd_openmp',
+       type: 'feature', value: 'auto',
+       description: 'Thread the hvd-core solver loops with OpenMP. auto takes whatever the toolchain provides (libgomp/libomp with GCC/Clang, /openmp with MSVC, Homebrew libomp with Apple Clang on Meson 1.5+) and quietly falls back to serial loops without it. Biggest win for one-frame-at-a-time callers; a thread_count pool of workers each spawning a full OpenMP team will oversubscribe the cores, so file-pipeline callers should shrink one or the other')
+
 option('with_tests',
        type: 'boolean', value: true,
        description: 'Build the test suite')

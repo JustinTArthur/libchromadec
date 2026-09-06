@@ -43,6 +43,14 @@ Particular contributors visible in that history (non-exhaustive):
   (`src/ldzeug_decoders.{h,cpp}`) was contributed by its maintainers building
   on jsaowji's reference implementation.
 
+## hvd-core (HVD decoder engine)
+
+- **vrunk11**: author of the
+  [hvd-cvbs-decoding](https://github.com/vrunk11/hvd-cvbs-decoding) project,
+  whose `hvd-core` engine backs the `CHD_DEC_HVD_*` decoder kinds. The engine
+  is built as-is from a pinned Meson subproject (`subprojects/hvd-core.wrap`)
+  rather than ported, so its code and history stay in the upstream repository.
+
 ## CVBS file format specification
 
 - **Simon Inns** and the contributors to the `cvbs-file-format-specification`

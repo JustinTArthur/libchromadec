@@ -79,6 +79,17 @@ endif
 if has_fftw
   chromadec_cpp_args += ['-DCHD_WITH_FFTW=1']
 endif
+# The HVD (holographic-variational) decoder, backed by the bundled hvd-core
+# subproject. Like the bundled SQLite, the engine's objects are folded into
+# libchromadec via link_whole (hvd_core_whole, top-level meson.build) so the
+# installed archives are self-contained; only fftw3f stays external.
+if has_hvd
+  chromadec_sources += files(
+    'decoders/hvd/hvd_decoder.cpp',
+  )
+  chromadec_deps += [hvd_core_dep]
+  chromadec_cpp_args += ['-DCHD_WITH_HVD=1']
+endif
 if has_cuda
   # nnTransform3D's device-resident pipeline: cuFFT for the 3D FFTs +
   # ORT IoBinding so the CUDA / TensorRT EP can read inputs and write
@@ -198,7 +209,7 @@ libchromadec = library('chromadec',
   chromadec_sources,
   include_directories: [public_inc, version_inc],
   dependencies: chromadec_deps,
-  link_whole: sqlite3_whole,
+  link_whole: sqlite3_whole + hvd_core_whole,
   cpp_args: chromadec_cpp_args,
   cuda_args: chromadec_cuda_args,
   objcpp_args: chromadec_objcpp_args,

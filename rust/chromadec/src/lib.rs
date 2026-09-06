@@ -62,10 +62,14 @@ pub mod options {
     pub const CHROMA_CLICK_FREQ_OVERSHOOT: &str = "chroma_click_freq_overshoot"; // f64, SECAM expert
     pub const TRANSFORM_THRESHOLD: &str = "transform_threshold"; // f64
     pub const TRANSFORM_THRESHOLDS_FILE: &str = "transform_thresholds_file"; // str
+    pub const FIRST_ACTIVE_SAMPLE: &str = "first_active_sample"; // i32
+    pub const LAST_ACTIVE_SAMPLE: &str = "last_active_sample"; // i32
     pub const FIRST_ACTIVE_FRAME_LINE: &str = "first_active_frame_line"; // i32
     pub const LAST_ACTIVE_FRAME_LINE: &str = "last_active_frame_line"; // i32
     pub const NN_INPUT_MAGNITUDE_SCALE: &str = "nn_input_magnitude_scale"; // f64
     pub const NN_CHROMA_BANDPASS: &str = "nn_chroma_bandpass"; // bool
+    pub const HVD_CG_ITERATIONS: &str = "hvd_cg_iterations"; // i32, HVD
+    pub const HVD_TEMPORAL_STRENGTH: &str = "hvd_temporal_strength"; // f64, HVD 3D
     pub const OUTPUT_FORMAT: &str = "output_format"; // str
     pub const OUTPUT_CLAMP: &str = "output_clamp"; // str
     pub const COLOR_DIFFERENCE_PRECISION: &str = "color_difference_precision"; // str
@@ -89,7 +93,7 @@ pub fn version_string() -> &'static str {
 }
 
 /// Whether a feature (e.g. `"nn"`, `"onnxruntime"`, `"coreml"`, `"cuda"`,
-/// `"rocm"`, `"fftw"`, `"sqlite"`) was compiled into the library.
+/// `"rocm"`, `"fftw"`, `"hvd"`, `"sqlite"`) was compiled into the library.
 pub fn has_feature(feature: &str) -> bool {
     let Ok(feature) = CString::new(feature) else {
         return false;

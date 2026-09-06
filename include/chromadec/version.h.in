@@ -15,8 +15,8 @@ extern "C" {
 const char *chd_version_string(void);
 void        chd_version(int *major, int *minor, int *patch);
 
-/* feature: "nn", "onnxruntime", "coreml", "cuda", "rocm", "fftw", "sqlite".
- * Returns 1 if compiled in. */
+/* feature: "nn", "onnxruntime", "coreml", "cuda", "rocm", "fftw", "hvd",
+ * "sqlite". Returns 1 if compiled in. */
 int         chd_has_feature(const char *feature);
 
 #ifdef __cplusplus
