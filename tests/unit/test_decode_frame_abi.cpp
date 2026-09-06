@@ -1167,7 +1167,7 @@ int testPhaseCompensationOptionScope(const fs::path &dir) {
 
 // ─── Test: decode-level Y/C merge from a luma.tbc + chroma.tbc pair. ───────
 //
-// chd_video_open_yc on an ld-decode luma + chroma .tbc pair takes the
+// chd_video_open_yc on a luma + chroma .tbc pair takes the
 // decode-merge path: the luma plane is Mono-decoded for Y and the chroma plane
 // colour-decoded for U/V, then merged. (That open even succeeding proves the
 // path engaged: a .tbc.db sidecar is ld-decode schema, so the CVBS YC path
@@ -1229,10 +1229,122 @@ int testYcMergeDualTbc(const fs::path &dir) {
     chd_decoder_free(dec);
     chd_video_free(video);
 
-    fs::remove(lumaTbc);
-    fs::remove(lumaDb);
-    fs::remove(chromaTbc);
+    // decode-orc names the planes pair.tbcy + pair.tbcc and keeps one shared
+    // sidecar at pair.tbc.db; auto-location must find it from either plane.
+    const std::string orcLuma   = (dir / "pair.tbcy").string();
+    const std::string orcChroma = (dir / "pair.tbcc").string();
+    const std::string orcDb     = (dir / "pair.tbc.db").string();
+    fs::rename(lumaTbc, orcLuma);
+    fs::rename(chromaTbc, orcChroma);
+    fs::rename(lumaDb, orcDb);
     fs::remove(chromaDb);
+    REQUIRE(chd_video_open_yc(orcLuma.c_str(), orcChroma.c_str(), nullptr, nullptr, &video)
+            == CHD_OK);
+    REQUIRE(chd_video_get_info(video, &info) == CHD_OK);
+    REQUIRE(info.num_frames == 3);
+    chd_video_free(video);
+
+    fs::remove(orcLuma);
+    fs::remove(orcChroma);
+    fs::remove(orcDb);
+    return 0;
+}
+
+// ─── Test: a CVBS .cvbsy/.cvbsc pair is decoded per plane, not recombined. ─
+//
+// The luma plane carries a pure subcarrier-frequency pattern (period 4
+// samples). A composite decoder would take that for chroma and comb it out of
+// Y; per-plane decoding hands the plane to Mono untouched. So the pair's Y must
+// equal a Mono decode of the .cvbsy alone, and must still carry the pattern.
+// PAL keeps the synthesized metadata free of the NTSC field-phase measurement.
+int testYcCvbsPairKeepsLuma(const fs::path &dir) {
+    const std::string lumaPath   = (dir / "pair.cvbsy").string();
+    const std::string chromaPath = (dir / "pair.cvbsc").string();
+    constexpr int32_t fieldWidth  = 1135;
+    constexpr int32_t fieldHeight = 313;
+    constexpr int32_t numFields   = 4;
+    constexpr size_t  numSamples  = static_cast<size_t>(fieldWidth) * fieldHeight * numFields;
+
+    {
+        // 10-bit PAL: blanking/black 256; the pattern swings ±80 about 400.
+        std::vector<int16_t> luma(numSamples);
+        for (size_t i = 0; i < numSamples; i++) {
+            const int32_t phase = static_cast<int32_t>((i % fieldWidth) % 4);
+            luma[i] = static_cast<int16_t>(400 + (phase == 0 ? 80 : phase == 2 ? -80 : 0));
+        }
+        std::ofstream out(lumaPath, std::ios::binary);
+        REQUIRE(out.is_open());
+        out.write(reinterpret_cast<const char *>(luma.data()),
+                  static_cast<std::streamsize>(luma.size() * sizeof(int16_t)));
+        REQUIRE(out.good());
+    }
+    REQUIRE(writeUniformCvbs(chromaPath, numSamples, 512));  // neutral chroma
+
+    chd_video_params_t params{};
+    params.standard     = CHD_STD_PAL;
+    params.encoding     = CHD_ENC_CVBS_U10_4FSC;
+    params.signal_state = CHD_SIG_STANDARD_TBC_LOCKED;
+    params.layout       = CHD_FRAME_LAYOUT_FIELD_RASTER;
+
+    auto decodeY = [&](chd_video_t *video, chd_decoder_kind_t kind,
+                       std::vector<uint16_t> &y, int32_t &width, int32_t &height) {
+        chd_decoder_t *dec = nullptr;
+        REQUIRE(chd_decoder_create(video, kind, &dec) == CHD_OK);
+        REQUIRE(chd_decoder_set_option_i32(dec, CHD_OPT_PADDING_MULTIPLE, 1) == CHD_OK);
+        REQUIRE(chd_decoder_commit(dec) == CHD_OK);
+        chd_frame_t *frame = nullptr;
+        REQUIRE(chd_decode_frame(dec, 0, &frame) == CHD_OK);
+        chd_frame_info_t finfo;
+        REQUIRE(chd_frame_get_info(frame, &finfo) == CHD_OK);
+        width  = finfo.width;
+        height = finfo.height;
+        const void *data = nullptr;
+        ptrdiff_t stride = 0;
+        REQUIRE(chd_frame_get_plane(frame, CHD_PLANE_Y, &data, &stride) == CHD_OK);
+        y.resize(static_cast<size_t>(width) * height);
+        for (int32_t row = 0; row < height; row++) {
+            const auto *src = reinterpret_cast<const uint16_t *>(
+                static_cast<const uint8_t *>(data) + row * stride);
+            std::copy(src, src + width, y.begin() + static_cast<ptrdiff_t>(row) * width);
+        }
+        chd_frame_free(frame);
+        chd_decoder_free(dec);
+        return 0;
+    };
+
+    // The pair, colour-decoded (PAL 2D on the chroma plane, Mono on luma).
+    chd_video_t *pair = nullptr;
+    REQUIRE(chd_video_open_yc(lumaPath.c_str(), chromaPath.c_str(), nullptr, &params, &pair)
+            == CHD_OK);
+    chd_video_info_t info{};
+    REQUIRE(chd_video_get_info(pair, &info) == CHD_OK);
+    REQUIRE(info.num_frames == 2);
+    std::vector<uint16_t> pairY;
+    int32_t pairW = 0, pairH = 0;
+    if (int rc = decodeY(pair, CHD_DEC_PAL_2D, pairY, pairW, pairH); rc != 0) return rc;
+    chd_video_free(pair);
+
+    // The luma plane alone, Mono-decoded as a composite file.
+    chd_video_t *lumaOnly = nullptr;
+    REQUIRE(chd_video_open_composite(lumaPath.c_str(), nullptr, &params, &lumaOnly) == CHD_OK);
+    std::vector<uint16_t> monoY;
+    int32_t monoW = 0, monoH = 0;
+    if (int rc = decodeY(lumaOnly, CHD_DEC_MONO, monoY, monoW, monoH); rc != 0) return rc;
+    chd_video_free(lumaOnly);
+
+    REQUIRE(pairW == monoW && pairH == monoH);
+    REQUIRE(pairY == monoY);
+    // The subcarrier-rate luma pattern survived: one period of four samples
+    // still spans the swing, on the first and last active rows.
+    for (int32_t row : {0, pairH - 1}) {
+        const uint16_t *y = pairY.data() + static_cast<ptrdiff_t>(row) * pairW;
+        const auto [lo, hi] = std::minmax_element(y, y + 4);
+        REQUIRE(*hi > *lo);
+        REQUIRE(y[0] == y[4] && y[1] == y[5]);
+    }
+
+    fs::remove(lumaPath);
+    fs::remove(chromaPath);
     return 0;
 }
 
@@ -1556,6 +1668,7 @@ int main() {
     if (int rc = testOutputClampOption(dir);          rc != 0) return rc;
     if (int rc = testPhaseCompensationOptionScope(dir); rc != 0) return rc;
     if (int rc = testYcMergeDualTbc(dir);             rc != 0) return rc;
+    if (int rc = testYcCvbsPairKeepsLuma(dir);        rc != 0) return rc;
     if (int rc = testPaddingAndSampleCrop(dir);       rc != 0) return rc;
     if (int rc = testSignalLineConversion(dir);       rc != 0) return rc;
     if (int rc = testStandardSampleConversion(dir);   rc != 0) return rc;

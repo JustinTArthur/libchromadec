@@ -49,7 +49,7 @@ impl Video {
     }
 
     /// Opens a dual-file Y/C capture (`chd_video_open_yc`): a CVBS `.cvbsy`/`.cvbsc`
-    /// pair or an ld-decode luma `.tbc` + chroma `.tbc` pair. Sidecar
+    /// pair or a luma `.tbc` + chroma `.tbc` pair. Sidecar
     /// resolution follows [`Video::open_composite`].
     pub fn open_yc(
         luma_path: impl AsRef<Path>,

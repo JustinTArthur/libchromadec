@@ -161,7 +161,7 @@ chd_status_t decodeSourceFrame(
     chd_decoder_t *d,
     chd::reader::ISource &source, chd::metadata::LdDecodeMetaData &meta,
     chd::decoders::Decoder &decoder, int32_t lookBehind, int32_t lookAhead,
-    std::vector<chd_video_extra> &extraSources,
+    std::vector<chd_video_source> &extraSources,
     std::unique_ptr<chd::dropout::MultiSourceAlignment> &alignment,
     std::once_flag &alignmentOnce,
     int64_t frame_index, chd::output::ComponentFrame &outCF,
@@ -184,7 +184,7 @@ chd_status_t decodeSourceFrame(
 
     // Apply dropout correction if requested. Single-source if no extras
     // are attached; otherwise build a vector<ExtraSourceFrame> from each
-    // chd_video_extra and use the multi-source DropoutCorrector overload.
+    // chd_video_source and use the multi-source DropoutCorrector overload.
     if (d->dropoutOptsSet && d->dropoutOpts.enabled != 0) {
         chd::dropout::DropoutCorrector corrector(d->videoParameters);
 

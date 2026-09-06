@@ -892,8 +892,8 @@ int testCvbsComposite(const fs::path &dir) {
     return 0;
 }
 
-// SECAM over the CVBS .y/.c pair: the .c holds the FM block oscillating
-// about the centred-chroma zero; the reader recombines a composite.
+// SECAM over the CVBS .cvbsy/.cvbsc pair: the .cvbsc holds the FM block
+// oscillating about the centred-chroma zero and is decoded as its own plane.
 int testCvbsYcPair(const fs::path &dir) {
     const std::string yPath = (dir / "gen.cvbsy").string();
     const std::string cPath = (dir / "gen.cvbsc").string();

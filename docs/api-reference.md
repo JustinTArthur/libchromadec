@@ -717,8 +717,9 @@ Open a single-file composite capture: an ld-decode `.tbc` or a CVBS
 
 - `metadata_path_or_null`: `NULL` auto-locates the sidecar next to the data
   file: an ld-decode `<path>.db` (SQLite) / `<path>.json`, else a CVBS
-  `<basename>.meta`. A `const char *` is an explicit path to a `.db`, `.json`,
-  or `.meta` sidecar.
+  `<basename>.meta`. A decode-orc `<base>.tbcy` / `<base>.tbcc` plane looks
+  for `<base>.tbc.db` / `<base>.tbc.json`. A `const char *` is an explicit
+  path to a `.db`, `.json`, or `.meta` sidecar.
 - `override_or_null`: `NULL` means all parameters come from the sidecar. When
   no sidecar is found, the override is mandatory and must set `standard`,
   `encoding`, and `signal_state`; the open fails otherwise. When a sidecar is
@@ -742,17 +743,16 @@ chd_status_t chd_video_open_yc(const char *luma_path,
                                chd_video_t **out);
 ```
 
-Open a dual-file Y/C capture: a CVBS `.cvbsy` + `.cvbsc` pair, or a vhs-decode luma
-`.tbc` + chroma `.tbc` pair. Sidecar resolution and flavour detection follow
+Open a dual-file Y/C capture: a CVBS `.cvbsy` + `.cvbsc` pair, or a luma `.tbc` +
+chroma `.tbc` pair. Sidecar resolution and flavour detection follow
 [`chd_video_open_composite`](#chd_video_open_composite); the
 `metadata_path_or_null` applies to the luma plane, and the chroma plane uses its
-own sidecar if present, else falls back to the luma sidecar (vhs-decode writes a
-single shared `<base>.tbc.json` for the pair).
+own sidecar if present, else falls back to the luma sidecar (some producers
+write a single shared sidecar for the pair).
 
-For a vhs-decode pair the two planes are decoded separately and merged: the
-luma plane is decoded with the Mono kind for Y and the chroma plane with the
-configured colour kind for Cb/Cr. A CVBS `.cvbsy`/`.cvbsc` pair instead reconstructs a
-composite from the centred-chroma `.cvbsc` and decodes it in one pass.
+The two planes are decoded separately and merged: the luma plane is decoded
+with the Mono kind for Y and the chroma plane with the configured colour kind
+for Cb/Cr.
 
 ### chd_video_get_info
 

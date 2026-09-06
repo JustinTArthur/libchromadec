@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// CvbsCompositeSource — ISource implementation for the CVBS file format
-// specification's `<basename>.cvbs` layout (single file containing
-// luma+chroma combined into one signal).
+// CvbsCompositeSource — ISource implementation for a CVBS file format
+// composite signal data file (`<basename>.cvbs`) or one plane of a
+// dual-file Y/C layout (`<basename>.cvbsy` luma, `<basename>.cvbsc` chroma).
 //
 // On open the source pairs the on-disk binary with a Video Standard Preset,
 // Sample Encoding Preset, and Signal State Preset. Per-encoding amplitude
 // conversion happens at load time so the decoder pipeline always sees
 // canonical uint16_t samples in the canonical TBC convention (10-bit value × 64,
-// blanking at 16384).
+// blanking at 16384). A `.cvbsy` follows the composite level definitions and
+// reads exactly like a `.cvbs`. A `.cvbsc` holds the chroma excursion centred
+// on 10-bit 512 (spec: sample-encoding-presets.md); in chroma-plane mode the
+// excursion is re-centred on blanking so the colour decoders see the same
+// chroma-only, composite-shaped plane a chroma `.tbc` has.
 //
 // Files are addressed per the resolved FrameLayout. A field-raster file is
 // blocked like a .tbc (fixed rows of fieldWidth samples, both fields padded
@@ -43,10 +47,14 @@ class CvbsCompositeSource : public ISource
 public:
     using Data = chd::reader::Data;
 
+    // Which signal the file holds. COMPOSITE covers `.cvbs` and `.cvbsy`
+    // (both use the composite level definitions); CHROMA is a `.cvbsc`.
+    enum class Plane { COMPOSITE, CHROMA };
+
     CvbsCompositeSource();
     ~CvbsCompositeSource() override;
 
-    // Open a composite file with the given preset triple. The Video Standard
+    // Open a sample file with the given preset triple. The Video Standard
     // Preset fixes the field geometry; the Sample Encoding Preset selects
     // amplitude conversion; the Signal State Preset controls whether
     // normative sample-count constraints apply and is reported back via
@@ -56,15 +64,23 @@ public:
     // declaredFrames (the `.meta` frame count) and the file size.
     // subcarrierLockedOverride marks a subcarrier-locked field raster.
     //
+    // A frame-native file's row alignment is measured from its sync edges. A
+    // chroma plane has no sync, so a CHROMA open takes the alignment the
+    // caller measured on the matching luma plane via frameNativeAlignment
+    // (ignored for a field raster; a missing value falls back to sync-start).
+    //
     // Returns true on success. On failure, the source is left invalid.
-    bool open(const std::string &compositePath,
+    bool open(const std::string &path,
               const chd::format::VideoStandardPreset &videoStandard,
               chd::format::SampleEncoding sampleEncoding,
               chd::format::SignalState signalState,
               std::optional<int32_t> blackLevelOverride = std::nullopt,
               chd::format::FrameLayout layoutOverride = chd::format::FrameLayout::UNKNOWN,
               std::optional<int64_t> declaredFrames = std::nullopt,
-              std::optional<bool> subcarrierLockedOverride = std::nullopt);
+              std::optional<bool> subcarrierLockedOverride = std::nullopt,
+              Plane plane = Plane::COMPOSITE,
+              std::optional<chd::format::HorizontalAlignment> frameNativeAlignment =
+                  std::nullopt);
 
     void close();
 
@@ -93,7 +109,8 @@ public:
 private:
     // Read the requested raw byte range from the file under ioMutex, then
     // return a freshly-allocated buffer of canonical-domain uint16_t samples
-    // produced by per-encoding amplitude conversion.
+    // produced by per-encoding amplitude conversion (composite levels, or the
+    // centred chroma excursion re-centred on blanking for a CHROMA plane).
     Data readAndConvert(int64_t startByte, int64_t numBytes);
 
     std::ifstream inputFile;
@@ -122,6 +139,7 @@ private:
     chd::format::VideoStandard          standardEnum;
     chd::format::SampleEncoding         encoding;
     chd::format::SignalState            state;
+    Plane                               plane = Plane::COMPOSITE;
     chd::metadata::LdDecodeMetaData::VideoParameters videoParameters;
 
     // Whole-field cache (matches TbcSource's behaviour). Serialised by

@@ -163,7 +163,7 @@ int testOpenTimeRedeclaration(const fs::path &dir) {
 }
 
 int testOpenYcRedeclaration(const fs::path &dir) {
-    // vhs-decode Y/C pair layout: luma + chroma planes, one shared sidecar.
+    // Y/C pair with one shared sidecar, the layout vhs-decode writes.
     const std::string luma    = (dir / "pair.tbc").string();
     const std::string chroma  = (dir / "pair_chroma.tbc").string();
     const std::string sidecar = (dir / "pair.tbc.json").string();

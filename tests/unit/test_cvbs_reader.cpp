@@ -8,8 +8,8 @@
 //      Exercise chd_video_open_composite + chd_video_get_info; verify
 //      the field count and sample-encoding fold (× 64).
 //
-//   2. Synthesise a YC pair (`.cvbsy` + `.cvbsc`) with the same metadata; verify
-//      composite synthesis = luma + (chroma − 512).
+//   2. Synthesise a `.cvbsc` chroma plane; verify the chroma-plane read
+//      re-centres the 512-centred excursion on blanking.
 //
 //   3. Synthesise a meta sidecar with an unknown preset; verify the open
 //      fails with CHD_E_METADATA_CORRUPT and a descriptive error.
@@ -41,7 +41,6 @@
 // (matches the test_encode_orc_color_bars pattern).
 #include "../../src/common/log.h"
 #include "../../src/reader/cvbs_composite_source.h"
-#include "../../src/reader/cvbs_yc_source.h"
 #include "../../src/format/video_standards.h"
 
 namespace fs = std::filesystem;
@@ -282,47 +281,51 @@ int testCompositeSampleConversion() {
     return 0;
 }
 
-int testYcSynthesis() {
+int testChromaPlaneRead() {
     using namespace chd::format;
+    using Plane = chd::reader::CvbsCompositeSource::Plane;
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string yPath = (tmpDir / "yc.cvbsy").string();
     const std::string cPath = (tmpDir / "yc.cvbsc").string();
 
-    // One NTSC field of luma at value 282 (10-bit "black") + chroma at value
-    // 600 (excursion of +88 from centre 512). After synthesis:
-    //   composite = 282 × 64 + (600 − 512) × 64 = 18048 + 5632 = 23680.
+    // One NTSC field of chroma at value 600 (excursion of +88 from centre
+    // 512). A chroma-plane read puts the excursion on blanking:
+    //   240 × 64 + (600 − 512) × 64 = 15360 + 5632 = 20992.
     const size_t samplesPerField = 910 * 263;
-    REQUIRE(writeUniformSamples(yPath, samplesPerField, 282));
     REQUIRE(writeUniformSamples(cPath, samplesPerField, 600));
 
-    chd::reader::CvbsYcSource src;
-    REQUIRE(src.open(yPath, cPath, getVideoStandard(VideoStandard::NTSC),
-                     SampleEncoding::CVBS_U10_4FSC, SignalState::STANDARD_TBC_LOCKED));
+    chd::reader::CvbsCompositeSource src;
+    REQUIRE(src.open(cPath, getVideoStandard(VideoStandard::NTSC),
+                     SampleEncoding::CVBS_U10_4FSC, SignalState::STANDARD_TBC_LOCKED,
+                     std::nullopt, FrameLayout::UNKNOWN, std::nullopt, std::nullopt,
+                     Plane::CHROMA));
     auto data = src.getVideoField(1);
     REQUIRE(data.size() == samplesPerField);
-    REQUIRE(data[0] == 18048 + 5632);
+    REQUIRE(src.parameters().blanking16bIre == 15360);
+    REQUIRE(data[0] == 15360 + 5632);
+    REQUIRE(data[samplesPerField - 1] == 15360 + 5632);
     return 0;
 }
 
 // Write frameCount native frames where every sample of frame line L (0-based)
-// holds the value L + frameIndex, so the conform's row mapping is observable.
-// extraSamplesPerFrame appends PAL's 4 leftover samples after the uniform
-// lines, valued linesPerFrame + frameIndex (continuing the numbering).
+// holds the value base + L + frameIndex, so the conform's row mapping is
+// observable. extraSamplesPerFrame appends PAL's 4 leftover samples after the
+// uniform lines, valued base + linesPerFrame + frameIndex (continuing the
+// numbering).
 bool writeNativeFrames(const std::string &path, int32_t samplesPerLine,
                        int32_t linesPerFrame, int32_t frameCount,
-                       int32_t extraSamplesPerFrame = 0) {
+                       int32_t extraSamplesPerFrame = 0, int32_t base = 0) {
     std::ofstream out(path, std::ios::binary);
     if (!out.is_open()) return false;
     std::vector<int16_t> line(static_cast<size_t>(samplesPerLine));
     for (int32_t frame = 0; frame < frameCount; ++frame) {
         for (int32_t l = 0; l < linesPerFrame; ++l) {
-            std::fill(line.begin(), line.end(), static_cast<int16_t>(l + frame));
+            std::fill(line.begin(), line.end(), static_cast<int16_t>(base + l + frame));
             out.write(reinterpret_cast<const char *>(line.data()),
                       static_cast<std::streamsize>(line.size() * sizeof(int16_t)));
         }
         std::vector<int16_t> extras(static_cast<size_t>(extraSamplesPerFrame),
-                                    static_cast<int16_t>(linesPerFrame + frame));
+                                    static_cast<int16_t>(base + linesPerFrame + frame));
         out.write(reinterpret_cast<const char *>(extras.data()),
                   static_cast<std::streamsize>(extras.size() * sizeof(int16_t)));
     }
@@ -876,28 +879,33 @@ int testLayoutOverrideMerge() {
     return 0;
 }
 
-int testFrameNativeYc() {
+int testFrameNativeChromaPlane() {
     using namespace chd::format;
+    using Plane = chd::reader::CvbsCompositeSource::Plane;
     fs::path tmpDir = fs::temp_directory_path() / "chd_phase_d_test";
     fs::create_directories(tmpDir);
-    const std::string yPath = (tmpDir / "native.cvbsy").string();
     const std::string cPath = (tmpDir / "native.cvbsc").string();
-    // Luma carries the line index, chroma is centred (512 = no excursion), so
-    // the synthesized composite reproduces the conform mapping directly.
-    REQUIRE(writeNativeFrames(yPath, 910, 525, 1));
-    REQUIRE(writeUniformSamples(cPath, 477750, 512));
+    // A frame-native chroma plane: the line index rides on the centre (512 =
+    // no excursion) so the conform mapping is observable on blanking, and
+    // the row alignment comes from the caller (no sync to measure here).
+    REQUIRE(writeNativeFrames(cPath, 910, 525, 1, 0, 512));
 
-    chd::reader::CvbsYcSource src;
-    REQUIRE(src.open(yPath, cPath, getVideoStandard(VideoStandard::NTSC),
-                     SampleEncoding::CVBS_U10_4FSC, SignalState::STANDARD_TBC_LOCKED));
+    chd::reader::CvbsCompositeSource src;
+    REQUIRE(src.open(cPath, getVideoStandard(VideoStandard::NTSC),
+                     SampleEncoding::CVBS_U10_4FSC, SignalState::STANDARD_TBC_LOCKED,
+                     std::nullopt, FrameLayout::UNKNOWN, std::nullopt, std::nullopt,
+                     Plane::CHROMA, HorizontalAlignment::BLANKING_START));
     REQUIRE(src.frameLayout() == FrameLayout::FRAME_NATIVE);
+    REQUIRE(src.horizontalAlignment() == HorizontalAlignment::BLANKING_START);
     REQUIRE(src.getNumberOfAvailableFields() == 2);
+    const int32_t blanking = src.parameters().blanking16bIre;
     const auto f1 = src.getVideoField(1);
-    REQUIRE(f1[261 * 910] == 261 * 64);
-    REQUIRE(f1[262 * 910] == 262 * 64);
+    REQUIRE(f1[261 * 910] == blanking + 261 * 64);
+    REQUIRE(f1[262 * 910] == blanking + 262 * 64);
     const auto f2 = src.getVideoField(2);
-    REQUIRE(f2[0] == 263 * 64);
-    REQUIRE(f2[262 * 910] == 240 * 64);
+    REQUIRE(f2[0] == blanking + 263 * 64);
+    // The dummy padding line is blanking (an excursion of zero).
+    REQUIRE(f2[262 * 910] == blanking);
     return 0;
 }
 
@@ -943,7 +951,7 @@ int main() {
     rc |= testCompositeUnknownPreset();
     rc |= testCompositeOverride();
     rc |= testCompositeSampleConversion();
-    rc |= testYcSynthesis();
+    rc |= testChromaPlaneRead();
     rc |= testResolveFrameLayout();
     rc |= testFrameNativeNtscConform();
     rc |= testFrameNativePalConform();
@@ -956,7 +964,7 @@ int main() {
     rc |= testResolveFrameNativeAlignment();
     rc |= testFrameNativeSyncStartWindows();
     rc |= testLayoutOverrideMerge();
-    rc |= testFrameNativeYc();
+    rc |= testFrameNativeChromaPlane();
     rc |= testEncoderScLockedValidation();
     rc |= testRealCompositeDiagnostics();
     if (rc == 0) std::cout << "All CVBS reader tests passed.\n";

@@ -128,7 +128,7 @@ test('color_conversion', test_color_conversion)
 
 # CVBS reader end-to-end smoke tests. Uses the C ABI's
 # chd_video_open_cvbs_* entry points + reaches into the internal
-# CvbsCompositeSource / CvbsYcSource for sample-level assertions.
+# CvbsCompositeSource for sample-level assertions.
 test_cvbs_reader = executable('test_cvbs_reader',
   'unit/test_cvbs_reader.cpp',
   dependencies: chromadec_internal_dep)

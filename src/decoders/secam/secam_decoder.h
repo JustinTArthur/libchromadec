@@ -3,7 +3,7 @@
 // SECAM line-sequential FM chroma decoder.
 //
 // Decodes the SECAM FM chroma block (BT.1700 Part C / BT.470-6) from either
-// a separated chroma plane (vhs-decode Y/C TBC pair) or a composite signal:
+// the chroma plane of a Y/C pair or a composite signal:
 // block-FFT analytic signal with the receiver's HF "bell" (cloche) network,
 // the closed-form inverse of the encoder's anti-bell pre-correction, applied
 // in the frequency domain, a designed

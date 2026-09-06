@@ -38,14 +38,14 @@
 #include "../nn/inference_engine.h"
 #endif
 
-// One extra source for multi-source dropout correction. Each extra
-// carries its own ISource AND its own LdDecodeMetaData — the multi-source
-// DropoutCorrector::correctFrame overload needs per-source Field metadata
-// (dropouts + bPSNR) which the source itself doesn't carry. For sources
-// opened with an ld-decode sidecar the metadata is loaded from the
-// .db/.json sidecar; for CVBS sources it's synthesized from the source's
-// parameters() + field count.
-struct chd_video_extra {
+// One opened source plus the metadata the decode path needs: a primary
+// composite, one plane of a Y/C pair, or an extra source for multi-source
+// dropout correction (whose DropoutCorrector::correctFrame overload needs
+// per-source Field metadata, dropouts + bPSNR, that the source itself
+// doesn't carry). For sources opened with an ld-decode sidecar the metadata
+// is loaded from the .db/.json sidecar; for CVBS sources it's synthesized
+// from the source's parameters() + field count.
+struct chd_video_source {
     std::unique_ptr<chd::reader::ISource> source;
     std::unique_ptr<chd::metadata::LdDecodeMetaData> metadata;
     bool metadataSynthesized = false;
@@ -64,18 +64,17 @@ struct chd_video {
     std::unique_ptr<chd::reader::ISource> source;
     std::string primaryPath;
     bool metadataSynthesized = false;
-    std::vector<chd_video_extra> extraSources;
+    std::vector<chd_video_source> extraSources;
 
     // Decode-level Y/C merge: when non-null, `source` carries luma and this
-    // carries the separately-decoded chroma plane (a vhs-decode luma.tbc +
-    // chroma.tbc pair). The luma plane is decoded with a Mono decoder and the
-    // chroma plane with the configured colour decoder; their U/V are merged.
-    // CVBS .y/.c pairs do NOT use this path (their chroma is centred-at-512,
-    // not composite-shaped, so it can't be colour-decoded as-is); they open a
-    // single CvbsYcSource as `source` with `chromaSource` left null.
+    // carries the separately-decoded chroma plane (a luma + chroma .tbc pair,
+    // or a CVBS .cvbsy/.cvbsc pair whose centred chroma the reader re-centres
+    // on blanking). The luma plane is decoded with a Mono
+    // decoder and the chroma plane with the configured colour decoder; their
+    // U/V are merged.
     std::unique_ptr<chd::reader::ISource> chromaSource;
     std::unique_ptr<chd::metadata::LdDecodeMetaData> chromaMetadata;
-    std::vector<chd_video_extra> chromaExtraSources;
+    std::vector<chd_video_source> chromaExtraSources;
 };
 
 // Per-decoder state. The lifecycle has two phases:

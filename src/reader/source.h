@@ -8,10 +8,10 @@
 //   - per-field sample data (uint16_t composite samples)
 //   - the count of available fields
 //
-// One ISource interface, three concrete implementations:
+// One ISource interface, two concrete implementations:
 //   - TbcSource             — ld-decode `.tbc` + sqlite/json sidecar
-//   - CvbsCompositeSource   — CVBS spec `.cvbs` + `.meta` sqlite sidecar
-//   - CvbsYcSource          — CVBS spec dual-file `.cvbsy` + `.cvbsc` + `.meta`
+//   - CvbsCompositeSource   — one CVBS spec sample file (`.cvbs`, or a
+//                             `.cvbsy` / `.cvbsc` plane) + `.meta` sqlite sidecar
 //
 // The signal-state and sample-encoding accessors let decoders refuse
 // incompatible inputs (raw-uncorrected signals) and let the I/O layer

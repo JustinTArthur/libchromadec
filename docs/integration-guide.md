@@ -446,7 +446,7 @@ the matching open function and metadata sidecar file from the
 | Input                                                       | Sidecar                              | `chd_video_params_t` fields to set                                                                      |
 |-------------------------------------------------------------|--------------------------------------|---------------------------------------------------------------------------------------------------------|
 | ld-decode / vhs-decode / encode-orc composite `.tbc`        | `.tbc.db` / `.tbc.json`              | none (pass `NULL`)                                                                                      |
-| vhs-decode luma + chroma `.tbc` pair                        | shared `.tbc.json`, or one per plane | none (pass `NULL`)                                                                                      |
+| luma + chroma `.tbc` pair, or decode-orc `.tbcy` + `.tbcc`   | shared `.tbc.json`, or one per plane | none (pass `NULL`)                                                                                      |
 | ld-chroma-encoder `.tbc` (line-locked or `--sc-locked` PAL) | `.tbc.db` / `.tbc.json`              | none (the sidecar carries the subcarrier lock)                                                          |
 | CVBS field raster with `.meta` (`.cvbs` or `.cvbsy`/`.cvbsc`) | `.meta`                            | none, or `is_subcarrier_locked = 1` for a subcarrier-locked (blanking-start) raster                     |
 | CVBS frame native with `.meta` (`.cvbs` or `.cvbsy`/`.cvbsc`) | `.meta`                            | none, or `layout = CHD_FRAME_LAYOUT_FRAME_NATIVE` at the ambiguous sizes noted below                    |

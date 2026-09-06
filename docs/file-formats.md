@@ -11,9 +11,9 @@ ld-decode `.tbc` and a CVBS `.cvbs` both open with `chd_video_open_composite`.
 | On disk | Open with | Sidecar | Notes |
 |---|---|---|---|
 | `capture.tbc` | [`chd_video_open_composite`](api-reference.md#chd_video_open_composite) | `capture.tbc.db` (SQLite) or `capture.tbc.json` | ld-decode output. Composite, time-base-corrected. |
-| `luma.tbc` + `chroma.tbc` | [`chd_video_open_yc`](api-reference.md#chd_video_open_yc) | `luma.tbc.db` + `chroma.tbc.db` | vhs-decode Y/C-separated pair (e.g. S-Video). Decoded per plane, then merged. |
+| `luma.tbc` + `chroma.tbc`, or `capture.tbcy` + `capture.tbcc` | [`chd_video_open_yc`](api-reference.md#chd_video_open_yc) | one per plane, or one shared `.tbc.db` / `.tbc.json` (`capture.tbc.db` for the `.tbcy`/`.tbcc` naming) | Y/C-separated pair (S-Video or colour-under capture). Decoded per plane, then merged. |
 | `capture.cvbs` | [`chd_video_open_composite`](api-reference.md#chd_video_open_composite) | `capture.meta` (SQLite) | CVBS single-file composite. |
-| `capture.cvbsy` + `capture.cvbsc` | [`chd_video_open_yc`](api-reference.md#chd_video_open_yc) | `capture.meta` (SQLite) | CVBS dual-file luma/chroma pair. |
+| `capture.cvbsy` + `capture.cvbsc` | [`chd_video_open_yc`](api-reference.md#chd_video_open_yc) | `capture.meta` (SQLite) | CVBS dual-file luma/chroma pair. Decoded per plane, then merged. |
 
 In every case the **sample data and the metadata live in separate files**: the
 data file is a bare stream of samples with no header, and all the information

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <chromadec/video.h>
 
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <memory>
@@ -17,7 +18,6 @@
 #include "../metadata/cvbs_metadata_sqlite.h"
 #include "../metadata/ld_metadata_sqlite.h"
 #include "../reader/cvbs_composite_source.h"
-#include "../reader/cvbs_yc_source.h"
 #include "../reader/source.h"
 #include "../reader/tbc_source.h"
 #include "handles.h"
@@ -84,8 +84,12 @@ std::vector<int32_t> measureNtscFieldPhaseIds(chd::reader::ISource &src, int32_t
     return ids;
 }
 
+// `burstSource` is where the NTSC field phase is measured: the source itself
+// for a composite, or the chroma plane of a Y/C pair when synthesizing the
+// luma plane's metadata (a luma plane carries no burst).
 std::unique_ptr<chd::metadata::LdDecodeMetaData>
-synthesizeMetadata(chd::reader::ISource &src, bool firstFieldFirst) {
+synthesizeMetadata(chd::reader::ISource &src, bool firstFieldFirst,
+                   chd::reader::ISource *burstSource = nullptr) {
     auto meta = std::make_unique<chd::metadata::LdDecodeMetaData>();
     meta->setVideoParameters(src.parameters());
     meta->setIsFirstFieldFirst(firstFieldFirst);
@@ -93,7 +97,8 @@ synthesizeMetadata(chd::reader::ISource &src, bool firstFieldFirst) {
     const int32_t nf = src.getNumberOfAvailableFields();
     if (nf <= 0) return meta;
 
-    const std::vector<int32_t> phaseIds = measureNtscFieldPhaseIds(src, nf);
+    const std::vector<int32_t> phaseIds =
+        measureNtscFieldPhaseIds(burstSource != nullptr ? *burstSource : src, nf);
     for (int32_t i = 0; i < nf; i++) {
         chd::metadata::LdDecodeMetaData::Field f;
         f.seqNo = i + 1;
@@ -269,9 +274,25 @@ std::string defaultMetaPath(const std::string &dataPath) {
     return stem.string();
 }
 
+// The path an ld-decode-style sidecar extends. decode-orc names a Y/C pair
+// `<base>.tbcy` + `<base>.tbcc` but keeps the shared metadata at
+// `<base>.tbc.db` / `<base>.tbc.json`, so those planes resolve through the
+// `.tbc` name (extension matched case-insensitively, as decode-orc does).
+std::string ldDecodeSidecarBase(const std::string &dataPath) {
+    constexpr size_t kExtLen = 5;  // ".tbcy" / ".tbcc"
+    if (dataPath.size() <= kExtLen) return dataPath;
+    std::string ext = dataPath.substr(dataPath.size() - kExtLen);
+    for (auto &c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (ext == ".tbcy" || ext == ".tbcc") {
+        return dataPath.substr(0, dataPath.size() - kExtLen) + ".tbc";
+    }
+    return dataPath;
+}
+
 // Resolve the sidecar for a data file and report its flavour. With an
 // explicit sidecar, the flavour follows its extension. Auto-location order:
-// the ld-decode `<path>.db` then `<path>.json`, then the CVBS
+// the ld-decode `<path>.db` then `<path>.json` (with `<base>.tbcy` /
+// `<base>.tbcc` planes looking beside `<base>.tbc`), then the CVBS
 // `<basename>.meta`. `found` is false when nothing was located (the caller
 // then needs a chd_video_params_t override).
 struct SidecarResolution {
@@ -289,8 +310,9 @@ SidecarResolution resolveSidecarFlavour(const std::string &dataPath,
         r.isCvbs = isCvbsSidecar(r.path);
         return r;
     }
-    const std::string db   = dataPath + ".db";
-    const std::string json = dataPath + ".json";
+    const std::string ldBase = ldDecodeSidecarBase(dataPath);
+    const std::string db   = ldBase + ".db";
+    const std::string json = ldBase + ".json";
     const std::string meta = defaultMetaPath(dataPath);
     if (fs::exists(db))        { r.path = db;   r.found = true; r.isCvbs = false; }
     else if (fs::exists(json)) { r.path = json; r.found = true; r.isCvbs = false; }
@@ -303,8 +325,8 @@ SidecarResolution resolveSidecarFlavour(const std::string &dataPath,
 //   CHD_E_METADATA_MISSING.
 //
 // The first available source wins. The returned preset triple is what the
-// CvbsCompositeSource / CvbsYcSource open path needs; `meta` (when a sidecar
-// was found) also carries the black_level override, applied at open time.
+// CvbsCompositeSource open path needs; `meta` (when a sidecar was found)
+// also carries the black_level override, applied at open time.
 struct ResolvedCvbsParams {
     const chd::format::VideoStandardPreset *videoStandard;
     chd::format::SampleEncoding             sampleEncoding;
@@ -421,14 +443,67 @@ chd_status_t resolveCvbsParams(const std::string &dataPath,
     return CHD_OK;
 }
 
-// One opened composite-shaped source plus the metadata the decode path needs.
-// For ld-decode inputs `metadata` carries the real per-field rows; for CVBS
-// inputs it is synthesized from the source parameters + field count.
-struct OpenedSource {
-    std::unique_ptr<chd::reader::ISource> source;
-    std::unique_ptr<chd::metadata::LdDecodeMetaData> metadata;
-    bool metadataSynthesized = false;
-};
+// Open one CVBS sample file with an already-resolved preset triple. `plane`
+// selects the level conversion; a chroma plane takes `frameNativeAlignment`
+// from its luma plane, since a chroma-only file has no sync edges to measure
+// a frame-native cut from. Returns null with the error detail set on failure.
+std::unique_ptr<chd::reader::CvbsCompositeSource> openCvbsReader(
+    const std::string &fn, const std::string &path, const ResolvedCvbsParams &resolved,
+    chd::reader::CvbsCompositeSource::Plane plane,
+    std::optional<chd::format::HorizontalAlignment> frameNativeAlignment) {
+    auto src = std::make_unique<chd::reader::CvbsCompositeSource>();
+    const std::optional<int32_t> blackOverride =
+        resolved.meta ? resolved.meta->blackLevelOverride : std::nullopt;
+    chd::detail::clear_last_error();
+    if (!src->open(path, *resolved.videoStandard, resolved.sampleEncoding,
+                   resolved.signalState, blackOverride, resolved.layoutOverride,
+                   resolved.declaredFrames, resolved.subcarrierLockedOverride,
+                   plane, frameNativeAlignment)) {
+        set_error(fn + ": " + chd::detail::detail_or("failed to open sample file"),
+                  CHD_E_IO);
+        return nullptr;
+    }
+    return src;
+}
+
+// Synthesize an opened CVBS reader's metadata (NTSC field phase measured on
+// `burstSource` when given, see synthesizeMetadata), apply a SECAM
+// re-declaration, and hand both over as an chd_video_source.
+void finishCvbsSource(std::unique_ptr<chd::reader::CvbsCompositeSource> src,
+                      const ResolvedCvbsParams &resolved,
+                      chd::reader::ISource *burstSource, chd_video_source *out) {
+    out->metadata = synthesizeMetadata(*src, !resolved.secondFieldFirst, burstSource);
+    if (resolved.declareSecam) {
+        out->metadata->overrideVideoSystem(chd::metadata::SECAM);
+        const auto &mvp = out->metadata->getVideoParameters();
+        src->redeclareVideoSystem(mvp.system, mvp.fSC);
+    }
+    out->source = std::move(src);
+    out->metadataSynthesized = true;
+}
+
+// Open both planes of a CVBS `.cvbsy`/`.cvbsc` pair. One `.meta` (or one
+// override) describes both; the chroma plane inherits the luma plane's
+// frame-native row alignment and lends the luma plane its burst for the
+// NTSC field-phase measurement.
+chd_status_t openCvbsYcPair(const std::string &fn, const std::string &lumaPath,
+                            const std::string &chromaPath, const char *sidecarOrNull,
+                            const chd_video_params_t *overrideOrNull,
+                            chd_video_source *luma, chd_video_source *chroma) {
+    using Plane = chd::reader::CvbsCompositeSource::Plane;
+    ResolvedCvbsParams resolved{};
+    const chd_status_t rc = resolveCvbsParams(lumaPath, sidecarOrNull, overrideOrNull, &resolved);
+    if (rc != CHD_OK) return rc;
+    auto lumaSrc = openCvbsReader(fn + " (luma)", lumaPath, resolved, Plane::COMPOSITE,
+                                  std::nullopt);
+    if (lumaSrc == nullptr) return CHD_E_IO;
+    auto chromaSrc = openCvbsReader(fn + " (chroma)", chromaPath, resolved, Plane::CHROMA,
+                                    lumaSrc->horizontalAlignment());
+    if (chromaSrc == nullptr) return CHD_E_IO;
+    finishCvbsSource(std::move(lumaSrc), resolved, chromaSrc.get(), luma);
+    finishCvbsSource(std::move(chromaSrc), resolved, nullptr, chroma);
+    return CHD_OK;
+}
 
 // Open a single composite source (ld-decode `.tbc` or CVBS `.cvbs`),
 // auto-detecting the sidecar flavour. `fn` is the caller name for error
@@ -436,7 +511,7 @@ struct OpenedSource {
 chd_status_t openCompositeSource(const std::string &fn, const std::string &path,
                                  const char *sidecarOrNull,
                                  const chd_video_params_t *overrideOrNull,
-                                 OpenedSource *out) {
+                                 chd_video_source *out) {
     const SidecarResolution sc = resolveSidecarFlavour(path, sidecarOrNull);
     if (sidecarOrNull != nullptr && !sc.found) {
         return set_error(fn + ": sidecar file does not exist: " + sc.path,
@@ -493,43 +568,77 @@ chd_status_t openCompositeSource(const std::string &fn, const std::string &path,
     const chd_status_t rc = resolveCvbsParams(
         path, sc.found ? sc.path.c_str() : nullptr, overrideOrNull, &resolved);
     if (rc != CHD_OK) return rc;
-    auto src = std::make_unique<chd::reader::CvbsCompositeSource>();
-    const std::optional<int32_t> blackOverride =
-        resolved.meta ? resolved.meta->blackLevelOverride : std::nullopt;
-    chd::detail::clear_last_error();
-    if (!src->open(path, *resolved.videoStandard, resolved.sampleEncoding,
-                   resolved.signalState, blackOverride, resolved.layoutOverride,
-                   resolved.declaredFrames, resolved.subcarrierLockedOverride)) {
-        return set_error(fn + ": " + chd::detail::detail_or("failed to open sample file"),
-                         CHD_E_IO);
+    auto src = openCvbsReader(fn, path, resolved,
+                              chd::reader::CvbsCompositeSource::Plane::COMPOSITE,
+                              std::nullopt);
+    if (src == nullptr) return CHD_E_IO;
+    finishCvbsSource(std::move(src), resolved, nullptr, out);
+    return CHD_OK;
+}
+
+// Open both planes of a Y/C pair. Either flavour decodes each plane on its
+// own: the luma plane with Mono and the chroma plane with the configured
+// colour kind, merged at decode time (see chd_video::chromaSource). The
+// sidecar flavour picks the readers: `.tbc.db`/`.tbc.json` is a luma + chroma
+// `.tbc` pair; `.meta`, or no sidecar with an override, is a CVBS
+// `.cvbsy`/`.cvbsc` pair. `fn` is the caller name for error prefixes;
+// both paths must already exist (callers check).
+chd_status_t openYcPair(const std::string &fn, const std::string &lumaPath,
+                        const std::string &chromaPath, const char *sidecarOrNull,
+                        const chd_video_params_t *overrideOrNull,
+                        chd_video_source *luma, chd_video_source *chroma) {
+    const SidecarResolution sc = resolveSidecarFlavour(lumaPath, sidecarOrNull);
+    if (sc.found && !sc.isCvbs) {
+        chd_status_t rc = openCompositeSource(fn + " (luma)", lumaPath, sidecarOrNull,
+                                              overrideOrNull, luma);
+        if (rc != CHD_OK) return rc;
+
+        // Prefer the chroma plane's own sidecar, but fall back to the luma
+        // sidecar: producers write either one sidecar per plane or a single
+        // shared one for the pair (vhs-decode writes `<base>.tbc.json` and no
+        // `<base>_chroma.tbc.json`). A shared sidecar describes the
+        // (identical) geometry of both planes.
+        const SidecarResolution chromaSc = resolveSidecarFlavour(chromaPath, nullptr);
+        const char *chromaSidecar = chromaSc.found ? nullptr : sc.path.c_str();
+        rc = openCompositeSource(fn + " (chroma)", chromaPath, chromaSidecar, overrideOrNull,
+                                 chroma);
+        if (rc != CHD_OK) return rc;
+    } else {
+        const chd_status_t rc = openCvbsYcPair(
+            fn, lumaPath, chromaPath, sc.found ? sc.path.c_str() : nullptr, overrideOrNull,
+            luma, chroma);
+        if (rc != CHD_OK) return rc;
     }
-    out->metadata = synthesizeMetadata(*src, !resolved.secondFieldFirst);
-    if (resolved.declareSecam) {
-        out->metadata->overrideVideoSystem(chd::metadata::SECAM);
-        const auto &mvp = out->metadata->getVideoParameters();
-        src->redeclareVideoSystem(mvp.system, mvp.fSC);
+
+    // The two planes come from one capture; require matching geometry and
+    // frame count so the decoded Y and U/V line up.
+    const auto &lvp = luma->source->parameters();
+    const auto &cvp = chroma->source->parameters();
+    if (lvp.fieldWidth != cvp.fieldWidth || lvp.fieldHeight != cvp.fieldHeight) {
+        return set_error(fn + ": luma and chroma have mismatched dimensions",
+                         CHD_E_FORMAT_UNSUPPORTED);
     }
-    out->source = std::move(src);
-    out->metadataSynthesized = true;
+    if (luma->metadata->getNumberOfFrames() != chroma->metadata->getNumberOfFrames()) {
+        return set_error(fn + ": luma and chroma have different frame counts",
+                         CHD_E_FORMAT_UNSUPPORTED);
+    }
+
+    warn625ChromaSignatureMismatch(*chroma->source, fn.c_str());
     return CHD_OK;
 }
 
 // Open one composite extra source and append it to `dst`.
 chd_status_t addCompositeExtra(const std::string &fn,
-                               std::vector<chd_video_extra> &dst,
+                               std::vector<chd_video_source> &dst,
                                const std::string &path, const char *sidecarOrNull) {
     if (!fs::exists(path)) {
         return set_error(fn + ": file does not exist: " + path,
                          CHD_E_FILE_NOT_FOUND);
     }
-    OpenedSource opened;
+    chd_video_source opened;
     const chd_status_t rc = openCompositeSource(fn, path, sidecarOrNull, nullptr, &opened);
     if (rc != CHD_OK) return rc;
-    chd_video_extra extra;
-    extra.source = std::move(opened.source);
-    extra.metadata = std::move(opened.metadata);
-    extra.metadataSynthesized = opened.metadataSynthesized;
-    dst.push_back(std::move(extra));
+    dst.push_back(std::move(opened));
     return CHD_OK;
 }
 
@@ -550,7 +659,7 @@ chd_status_t chd_video_open_composite(const char *path,
                          CHD_E_FILE_NOT_FOUND);
     }
 
-    OpenedSource opened;
+    chd_video_source opened;
     const chd_status_t rc = openCompositeSource(
         "chd_video_open_composite", path, metadata_path_or_null, override_or_null, &opened);
     if (rc != CHD_OK) return rc;
@@ -579,77 +688,14 @@ chd_status_t chd_video_open_yc(const char *luma_path, const char *chroma_path,
                          CHD_E_FILE_NOT_FOUND);
     }
 
-    const SidecarResolution sc = resolveSidecarFlavour(luma_path, metadata_path_or_null);
-    // A CVBS `.cvbsy`/`.cvbsc` pair (a `.meta` sidecar, or no sidecar + override) reads
-    // through a single CvbsYcSource that reconstructs a composite from the
-    // centred-chroma `.cvbsc`. A vhs-decode luma.tbc + chroma.tbc pair instead
-    // decodes each plane separately and merges (set up below).
-    const bool decodeMerge = sc.found && !sc.isCvbs;
+    chd_video_source luma;
+    chd_video_source chroma;
+    const chd_status_t rc = openYcPair("chd_video_open_yc", luma_path, chroma_path,
+                                       metadata_path_or_null, override_or_null, &luma, &chroma);
+    if (rc != CHD_OK) return rc;
 
     auto handle = std::make_unique<chd_video>();
-    handle->primaryPath = luma_path;
-
-    if (!decodeMerge) {
-        ResolvedCvbsParams resolved{};
-        const chd_status_t rc = resolveCvbsParams(
-            luma_path, sc.found ? sc.path.c_str() : nullptr, override_or_null, &resolved);
-        if (rc != CHD_OK) return rc;
-        auto src = std::make_unique<chd::reader::CvbsYcSource>();
-        const std::optional<int32_t> blackOverride =
-            resolved.meta ? resolved.meta->blackLevelOverride : std::nullopt;
-        chd::detail::clear_last_error();
-        if (!src->open(luma_path, chroma_path, *resolved.videoStandard,
-                       resolved.sampleEncoding, resolved.signalState, blackOverride,
-                       resolved.layoutOverride, resolved.declaredFrames,
-                       resolved.subcarrierLockedOverride)) {
-            return set_error("chd_video_open_yc: " +
-                                 chd::detail::detail_or("failed to open y/c files"),
-                             CHD_E_IO);
-        }
-        handle->metadata = synthesizeMetadata(*src, !resolved.secondFieldFirst);
-        if (resolved.declareSecam) {
-            handle->metadata->overrideVideoSystem(chd::metadata::SECAM);
-            const auto &mvp = handle->metadata->getVideoParameters();
-            src->redeclareVideoSystem(mvp.system, mvp.fSC);
-        }
-        warn625ChromaSignatureMismatch(*src, "chd_video_open_yc");
-        handle->metadataSynthesized = true;
-        handle->source  = std::move(src);
-        *out = handle.release();
-        return CHD_OK;
-    }
-
-    OpenedSource luma;
-    chd_status_t rc = openCompositeSource(
-        "chd_video_open_yc (luma)", luma_path, metadata_path_or_null, override_or_null, &luma);
-    if (rc != CHD_OK) return rc;
-
-    // Prefer the chroma plane's own sidecar, but fall back to the luma sidecar:
-    // vhs-decode writes one shared `<base>.tbc.json` for the pair, not a
-    // separate `<base>_chroma.tbc.json`. The shared sidecar describes the
-    // (identical) geometry of both planes.
-    const SidecarResolution chromaSc = resolveSidecarFlavour(chroma_path, nullptr);
-    const char *chromaSidecar = chromaSc.found ? nullptr : sc.path.c_str();
-    OpenedSource chroma;
-    rc = openCompositeSource(
-        "chd_video_open_yc (chroma)", chroma_path, chromaSidecar, override_or_null, &chroma);
-    if (rc != CHD_OK) return rc;
-
-    // The two planes come from one capture; require matching geometry and
-    // frame count so the decoded Y and U/V line up.
-    const auto &lvp = luma.source->parameters();
-    const auto &cvp = chroma.source->parameters();
-    if (lvp.fieldWidth != cvp.fieldWidth || lvp.fieldHeight != cvp.fieldHeight) {
-        return set_error("chd_video_open_yc: luma and chroma have mismatched dimensions",
-                         CHD_E_FORMAT_UNSUPPORTED);
-    }
-    if (luma.metadata->getNumberOfFrames() != chroma.metadata->getNumberOfFrames()) {
-        return set_error("chd_video_open_yc: luma and chroma have different frame counts",
-                         CHD_E_FORMAT_UNSUPPORTED);
-    }
-
-    warn625ChromaSignatureMismatch(*chroma.source, "chd_video_open_yc");
-
+    handle->primaryPath        = luma_path;
     handle->source             = std::move(luma.source);
     handle->metadata           = std::move(luma.metadata);
     handle->metadataSynthesized = luma.metadataSynthesized;
@@ -826,45 +872,15 @@ chd_status_t chd_video_add_extra_source_yc(chd_video_t *v, const char *luma_path
                          CHD_E_FILE_NOT_FOUND);
     }
 
-    const SidecarResolution sc = resolveSidecarFlavour(luma_path, metadata_path_or_null);
-    if (sc.found && !sc.isCvbs) {
-        // vhs-decode pair: a luma extra corrects the luma plane and a chroma
-        // extra corrects the separately-decoded chroma plane.
-        chd_status_t rc = addCompositeExtra(
-            "chd_video_add_extra_source_yc (luma)", v->extraSources,
-            luma_path, metadata_path_or_null);
-        if (rc != CHD_OK) return rc;
-        // Chroma plane falls back to the shared luma sidecar (vhs-decode writes
-        // one `.tbc.json` per pair).
-        const SidecarResolution chromaSc = resolveSidecarFlavour(chroma_path, nullptr);
-        const char *chromaSidecar = chromaSc.found ? nullptr : sc.path.c_str();
-        return addCompositeExtra(
-            "chd_video_add_extra_source_yc (chroma)", v->chromaExtraSources,
-            chroma_path, chromaSidecar);
-    }
-
-    // CVBS `.cvbsy`/`.cvbsc` pair: one CvbsYcSource extra, matching the primary.
-    ResolvedCvbsParams resolved{};
-    const chd_status_t rc = resolveCvbsParams(
-        luma_path, sc.found ? sc.path.c_str() : nullptr, nullptr, &resolved);
+    // A luma extra corrects the luma plane and a chroma extra corrects the
+    // separately-decoded chroma plane.
+    chd_video_source luma;
+    chd_video_source chroma;
+    const chd_status_t rc = openYcPair("chd_video_add_extra_source_yc", luma_path, chroma_path,
+                                       metadata_path_or_null, nullptr, &luma, &chroma);
     if (rc != CHD_OK) return rc;
-    auto src = std::make_unique<chd::reader::CvbsYcSource>();
-    const std::optional<int32_t> blackOverride =
-        resolved.meta ? resolved.meta->blackLevelOverride : std::nullopt;
-    chd::detail::clear_last_error();
-    if (!src->open(luma_path, chroma_path, *resolved.videoStandard,
-                   resolved.sampleEncoding, resolved.signalState, blackOverride,
-                   resolved.layoutOverride, resolved.declaredFrames,
-                   resolved.subcarrierLockedOverride)) {
-        return set_error("chd_video_add_extra_source_yc: " +
-                             chd::detail::detail_or("open failed"),
-                         CHD_E_IO);
-    }
-    chd_video_extra extra;
-    extra.metadata = synthesizeMetadata(*src, !resolved.secondFieldFirst);
-    extra.metadataSynthesized = true;
-    extra.source = std::move(src);
-    v->extraSources.push_back(std::move(extra));
+    v->extraSources.push_back(std::move(luma));
+    v->chromaExtraSources.push_back(std::move(chroma));
     return CHD_OK;
 }
 

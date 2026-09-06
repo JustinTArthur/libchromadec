@@ -2,6 +2,7 @@
 
 #include "cvbs_composite_source.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "../common/log.h"
@@ -14,14 +15,16 @@ CvbsCompositeSource::~CvbsCompositeSource()
     if (isOpen) inputFile.close();
 }
 
-bool CvbsCompositeSource::open(const std::string &compositePath,
+bool CvbsCompositeSource::open(const std::string &path,
                                const chd::format::VideoStandardPreset &videoStandard,
                                chd::format::SampleEncoding sampleEncoding,
                                chd::format::SignalState signalState,
                                std::optional<int32_t> blackLevelOverride,
                                chd::format::FrameLayout layoutOverride,
                                std::optional<int64_t> declaredFrames,
-                               std::optional<bool> subcarrierLockedOverride)
+                               std::optional<bool> subcarrierLockedOverride,
+                               Plane whichPlane,
+                               std::optional<chd::format::HorizontalAlignment> frameNativeAlignment)
 {
     if (isOpen) {
         chd::log::fail() << "source is already open";
@@ -32,11 +35,12 @@ bool CvbsCompositeSource::open(const std::string &compositePath,
     preset       = &videoStandard;
     encoding     = sampleEncoding;
     state        = signalState;
+    plane        = whichPlane;
     bytesPerSample = chd::format::getSampleEncoding(encoding).bytesPerSample;
 
-    inputFile.open(compositePath, std::ios::binary);
+    inputFile.open(path, std::ios::binary);
     if (!inputFile.is_open()) {
-        chd::log::fail() << "could not open" << compositePath;
+        chd::log::fail() << "could not open" << path;
         return false;
     }
     inputFile.seekg(0, std::ios::end);
@@ -72,18 +76,25 @@ bool CvbsCompositeSource::open(const std::string &compositePath,
     if (layout == chd::format::FrameLayout::FRAME_NATIVE) {
         // Resolve the horizontal alignment from the signal: measure 0H from
         // the sync edges of 50 post-VBI first-field rows, then rebuild the
-        // burst/active windows for the cut the capture actually uses.
-        std::optional<double> measured;
-        if (numFields >= 2 &&
-            chd::format::getSampleEncoding(encoding).hasStandardAmplitudeMapping) {
-            const auto plan = chd::format::planFrameNativeFieldRead(
-                videoStandard, 0, 40, 89, bytesPerSample);
-            const Data rows = readAndConvert(plan.startByte, plan.numBytes);
-            measured = chd::format::measureRowZeroH(rows.data(), 50, fieldWidth,
-                                                    videoStandard.levels);
+        // burst/active windows for the cut the capture actually uses. A
+        // chroma plane carries no sync, so it takes the luma plane's result.
+        chd::format::HorizontalAlignment alignment;
+        if (plane == Plane::CHROMA) {
+            alignment = frameNativeAlignment.value_or(
+                chd::format::HorizontalAlignment::SYNC_START);
+        } else {
+            std::optional<double> measured;
+            if (numFields >= 2 &&
+                chd::format::getSampleEncoding(encoding).hasStandardAmplitudeMapping) {
+                const auto plan = chd::format::planFrameNativeFieldRead(
+                    videoStandard, 0, 40, 89, bytesPerSample);
+                const Data rows = readAndConvert(plan.startByte, plan.numBytes);
+                measured = chd::format::measureRowZeroH(rows.data(), 50, fieldWidth,
+                                                        videoStandard.levels);
+            }
+            alignment = chd::format::resolveFrameNativeAlignment(
+                videoStandard, measured, "CvbsCompositeSource");
         }
-        const auto alignment = chd::format::resolveFrameNativeAlignment(
-            videoStandard, measured, "CvbsCompositeSource");
         videoParameters = chd::format::makeCvbsVideoParameters(
             videoStandard, sampleEncoding, blackLevelOverride, layout,
             subcarrierLockedOverride, alignment);
@@ -92,10 +103,10 @@ bool CvbsCompositeSource::open(const std::string &compositePath,
 
     isOpen = true;
     chd::log::debug().nospace()
-        << "CvbsCompositeSource::open(): " << compositePath << " has " << numFields
+        << "CvbsCompositeSource::open(): " << path << " has " << numFields
         << " fields (" << fieldWidth << "x" << fieldHeight << " samples/field, "
         << (layout == chd::format::FrameLayout::FRAME_NATIVE ? "frame-native" : "field-raster")
-        << ")";
+        << (plane == Plane::CHROMA ? ", chroma plane" : "") << ")";
     return true;
 }
 
@@ -226,6 +237,17 @@ CvbsCompositeSource::Data CvbsCompositeSource::readAndConvert(int64_t startByte,
 
     Data out(static_cast<size_t>(numSamples));
     const int32_t blanking10 = videoParameters.blanking16bIre / 64;
+    if (plane == Plane::CHROMA) {
+        // Centred chroma excursion (× 64) re-centred on blanking, clamped to
+        // the uint16_t canonical domain.
+        const int32_t blanking = videoParameters.blanking16bIre;
+        for (size_t i = 0; i < raw.size(); ++i) {
+            const int32_t v = blanking + chd::format::convertChromaSampleToCenteredCanonical(
+                                             encoding, raw[i], blanking10);
+            out[i] = static_cast<uint16_t>(std::clamp(v, 0, 65535));
+        }
+        return out;
+    }
     for (size_t i = 0; i < raw.size(); ++i) {
         out[i] = chd::format::convertCompositeSampleToCanonical(encoding, raw[i], blanking10);
     }

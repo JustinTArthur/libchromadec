@@ -16,7 +16,8 @@ void         chd_shutdown(void);
  * `.cvbs`. The parameters the raw samples omit come from a metadata
  * sidecar file next to the data. metadata_path_or_null:
  *   - NULL  → library auto-locates the sidecar next to path: an ld-decode
- *             `<path>.db` / `<path>.json`, else a CVBS `<basename>.meta`
+ *             `<path>.db` / `<path>.json` (a `.tbcy` / `.tbcc` plane looks
+ *             beside its `.tbc` name), else a CVBS `<basename>.meta`
  *   - explicit path to a `.db`, `.json`, or `.meta` sidecar
  * override_or_null:
  *   - NULL  → all parameters come from the sidecar
@@ -32,12 +33,12 @@ chd_status_t chd_video_open_composite(const char *path,
                                       const chd_video_params_t *override_or_null,
                                       chd_video_t **out);
 
-/* Open a dual-file Y/C capture: a CVBS `.cvbsy` + `.cvbsc` pair, or a vhs-decode
- * luma `.tbc` + chroma `.tbc` pair. The luma plane is decoded for Y and the
- * chroma plane for U/V, then merged. Sidecar resolution and flavour detection
- * follow chd_video_open_composite. metadata_path_or_null applies to the luma
- * plane; the chroma plane uses its own sidecar if present, else the luma one
- * (vhs-decode writes a single shared `<base>.tbc.json` for the pair). */
+/* Open a dual-file Y/C capture: a CVBS `.cvbsy` + `.cvbsc` pair, or a luma
+ * `.tbc` + chroma `.tbc` pair. The luma plane is decoded for Y and the chroma
+ * plane for U/V, then merged. Sidecar resolution and flavour detection follow
+ * chd_video_open_composite. metadata_path_or_null applies to the luma plane;
+ * the chroma plane uses its own sidecar if present, else the luma one (many
+ * producers write a single shared sidecar for the pair). */
 chd_status_t chd_video_open_yc(const char *luma_path,
                                const char *chroma_path,
                                const char *metadata_path_or_null,

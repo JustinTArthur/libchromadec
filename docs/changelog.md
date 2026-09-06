@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0] - Unreleased
+
+### Added
+
+- `chd_video_open_yc` accepts `.tbcy` / `.tbcc` plane names, resolving their
+  shared sidecar beside the `.tbc` base name.
+
+### Fixed
+
+- Y/C pairs with no ld-decode sidecar (every CVBS `.cvbsy`/`.cvbsc` pair, and
+  `.tbc` pairs opened from an override alone) were summed into a composite and
+  separated again, restoring crosstalk the capture never had. Both planes now
+  decode on their own and merge, as sidecar-carrying `.tbc` pairs already did,
+  so output changes for those sources. The 0.1.0 entry below claimed this of
+  both pair kinds; it held only for `.tbc`.
+
 ## [0.1.0] - 2026-08-16
 
 First release. libchromadec extracts the chroma decoding from `ld-decode`'s
