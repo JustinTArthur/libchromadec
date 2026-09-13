@@ -31,13 +31,13 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "../format/sample_encoding.h"
 #include "../format/signal_state.h"
 #include "../format/video_standards.h"
 #include "../metadata/core.h"
+#include "field_cache.h"
 #include "source.h"
 
 namespace chd::reader {
@@ -144,7 +144,7 @@ private:
 
     // Whole-field cache (matches TbcSource's behaviour). Serialised by
     // ioMutex.
-    std::unordered_map<int32_t, Data> fieldCache;
+    FieldCache fieldCache;
     mutable std::mutex ioMutex;
 };
 

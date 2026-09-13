@@ -16,6 +16,11 @@
 
 ### Fixed
 
+- The readers cached every whole field they had read and never evicted any, so
+  memory grew by a frame of source samples for every frame decoded — around a
+  megabyte per frame per source, enough to exhaust a machine partway through a
+  feature-length capture. The cache is now a bounded LRU, and reader memory
+  follows the decoders' field window rather than the length of the capture.
 - Y/C pairs with no ld-decode sidecar (every CVBS `.cvbsy`/`.cvbsc` pair, and
   `.tbc` pairs opened from an override alone) were summed into a composite and
   separated again, restoring crosstalk the capture never had. Both planes now

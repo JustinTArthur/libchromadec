@@ -111,6 +111,7 @@ void TbcSource::close()
     inputFile.close();
     isSourceVideoOpen = false;
     inputFilePos = -1;
+    fieldCache.clear();
 
     chd::log::debug() << "TbcSource::close(): Source video input file closed";
 }
@@ -206,9 +207,8 @@ TbcSource::Data TbcSource::getVideoField(int32_t fieldNumber, int32_t startField
         // Read the whole field
 
         // Check the cache (we only cache whole fields)
-        auto it = fieldCache.find(fieldNumber);
-        if (it != fieldCache.end()) {
-            return it->second;
+        if (const Data *cached = fieldCache.find(fieldNumber)) {
+            return *cached;
         }
 
         requiredReadLength = static_cast<int64_t>(fieldByteLength);
@@ -282,7 +282,7 @@ TbcSource::Data TbcSource::getVideoField(int32_t fieldNumber, int32_t startField
 
     if (startFieldLine == -1 && endFieldLine == -1) {
         // Insert the field data into the cache
-        fieldCache.emplace(fieldNumber, outputFieldData);
+        fieldCache.insert(fieldNumber, outputFieldData);
     }
 
     // Return the data

@@ -184,8 +184,7 @@ CvbsCompositeSource::Data CvbsCompositeSource::getVideoField(int32_t fieldNumber
 
     const bool wholeField = (startFieldLine == -1 && endFieldLine == -1);
     if (wholeField) {
-        auto it = fieldCache.find(fieldIndex);
-        if (it != fieldCache.end()) return it->second;
+        if (const Data *cached = fieldCache.find(fieldIndex)) return *cached;
     }
     // Lines are 1-based. Convert to 0-based and validate.
     const int32_t first0 = wholeField ? 0 : startFieldLine - 1;
@@ -212,7 +211,7 @@ CvbsCompositeSource::Data CvbsCompositeSource::getVideoField(int32_t fieldNumber
     }
 
     if (wholeField) {
-        fieldCache.emplace(fieldIndex, data);
+        fieldCache.insert(fieldIndex, data);
     }
     return data;
 }

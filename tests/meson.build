@@ -42,6 +42,14 @@ abi_smoke_c23 = executable('abi_smoke_c23',
   dependencies: chromadec_abi_dep)
 test('abi_smoke_c23', abi_smoke_c23)
 
+# Reader field cache: LRU eviction and, above all, the bound itself — without
+# it the reader holds every field it has ever read, so decoding a long capture
+# needs as much memory as the capture is big.
+test_field_cache = executable('test_field_cache',
+  'unit/test_field_cache.cpp',
+  dependencies: chromadec_internal_dep)
+test('field_cache', test_field_cache)
+
 test_tbc_reader = executable('test_tbc_reader',
   'unit/test_tbc_reader.cpp',
   dependencies: [chromadec_abi_dep, sqlite3_dep])

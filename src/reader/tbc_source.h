@@ -30,12 +30,12 @@
 #include <fstream>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "../format/sample_encoding.h"
 #include "../format/signal_state.h"
 #include "../metadata/core.h"
+#include "field_cache.h"
 #include "source.h"
 
 namespace chd::reader {
@@ -92,8 +92,8 @@ private:
 
     Data outputFieldData;
 
-    // Field caching
-    std::unordered_map<int32_t, Data> fieldCache;
+    // Whole-field caching, bounded so a long capture is not held in RAM.
+    FieldCache fieldCache;
 
     // Serialises I/O + cache access so concurrent getVideoField() calls from
     // different worker threads are race-free. The legacy
