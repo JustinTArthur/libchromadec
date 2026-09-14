@@ -238,13 +238,16 @@ jobs:
           tar -xzf ort.tgz -C ${HOME}/ort --strip-components=1
           echo "ORT_ROOT=${HOME}/ort" >> $GITHUB_ENV
 
+      # libgomp is not TSan-instrumented, so its fork/join ordering is invisible
+      # and every hvd-core OpenMP loop reports a false race.
       - name: Configure (TSan)
         run: |
           . .venv/bin/activate
           meson setup build \
             -Donnxruntime_root="${ORT_ROOT}" \
             -Db_sanitize=thread \
-            -Db_lundef=false
+            -Db_lundef=false \
+            -Dwith_hvd_openmp=disabled
 
       - name: Build
         run: |
