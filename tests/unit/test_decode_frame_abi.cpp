@@ -23,6 +23,7 @@
 // SourceField → Decoder → OutputWriter → chd_frame plumbing.
 
 #include <chromadec/chromadec.h>
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
