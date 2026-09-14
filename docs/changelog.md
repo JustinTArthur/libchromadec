@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-09-13
 
 ### Added
 
@@ -13,6 +13,9 @@
   `chd_has_feature("hvd")`.
 - `chd_video_open_yc` accepts `.tbcy` / `.tbcc` plane names, resolving their
   shared sidecar beside the `.tbc` base name.
+- Rust: `DecoderKind::Hvd2d` / `Hvd3d` and the `HVD_CG_ITERATIONS` /
+  `HVD_TEMPORAL_STRENGTH` option names, plus a test that fails when a
+  `CHD_DEC_*` or `CHD_OPT_*` has no counterpart in the crate.
 
 ### Fixed
 
@@ -27,6 +30,17 @@
   decode on their own and merge, as sidecar-carrying `.tbc` pairs already did,
   so output changes for those sources. The 0.1.0 entry below claimed this of
   both pair kinds; it held only for `.tbc`.
+- Rust: the `first_active_sample` and `last_active_sample` option names were
+  missing from `chromadec::options`.
+
+### Dependencies
+
+- hvd-core, optional, gating the HVD decoders. Fetched by the bundled wrap
+  from vrunk11's `hvd-cvbs-decoding` repository at v0.1.3 and linked
+  statically. `-Dwith_hvd=disabled` leaves it out.
+- OpenMP, optional, threading the hvd-core solver loops. `with_hvd_openmp`
+  takes whatever the toolchain provides and falls back to serial loops
+  without it.
 
 ## [0.1.0] - 2026-08-16
 

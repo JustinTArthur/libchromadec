@@ -6,12 +6,6 @@ brings the classical decoders (1D/2D/3D comb, PALcolour, Transform-PAL 2D/3D,
 SECAM) and the neural-network decoders (nnTransform3D, ldzeug2 color_cnn and
 luma_sep) together in one place.
 
-## Status
-
-0.1.0 is the first release. The C ABI is implemented, the library decodes, and
-the rules in [docs/abi-stability.md](docs/abi-stability.md) apply from here on:
-pre-1.0 the ABI breaks at the minor, and the soname moves with it.
-
 ## What it decodes
 
 **Sources.** A single-file composite (ld-decode / vhs-decode / encode-orc

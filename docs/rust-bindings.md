@@ -238,7 +238,7 @@ installed:
 
 ```toml
 [dependencies]
-chromadec = { version = "0.1", features = ["log"] }
+chromadec = { version = "0.2", features = ["log"] }
 ```
 
 ## Neural decoders

@@ -15,7 +15,7 @@ tokio = ["dep:tokio", "dep:futures-core"]
 log = ["dep:log"]
 
 [dependencies]
-chromadec-sys = { path = "../chromadec-sys", version = "0.1.0" }
+chromadec-sys = { path = "../chromadec-sys", version = "0.2.0" }
 tokio = { version = "1", optional = true, default-features = false, features = ["rt", "sync"] }
 futures-core = { version = "0.3", optional = true, default-features = false }
 log = { version = "0.4", optional = true, default-features = false }
