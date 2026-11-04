@@ -157,6 +157,9 @@ chd_status_t chd_nn_model_load_from_file(const char *model_path,
         handle->engine = std::make_shared<chd::nn::OrtEngine>(std::move(session));
         *out = handle.release();
         return CHD_OK;
+    } catch (const chd::nn::ProviderAttachError &e) {
+        chd::detail::set_last_error(std::string("chd_nn_model_load_from_file: ") + e.what());
+        return CHD_E_NN_BACKEND_UNAVAILABLE;
     } catch (const std::exception &e) {
         chd::detail::set_last_error(std::string("chd_nn_model_load_from_file: ") + e.what());
         return CHD_E_NN_MODEL_LOAD;
@@ -198,6 +201,9 @@ chd_status_t chd_nn_model_load_from_memory(const void *model_data,
         handle->engine = std::make_shared<chd::nn::OrtEngine>(std::move(session));
         *out = handle.release();
         return CHD_OK;
+    } catch (const chd::nn::ProviderAttachError &e) {
+        chd::detail::set_last_error(std::string("chd_nn_model_load_from_memory: ") + e.what());
+        return CHD_E_NN_BACKEND_UNAVAILABLE;
     } catch (const std::exception &e) {
         chd::detail::set_last_error(std::string("chd_nn_model_load_from_memory: ") + e.what());
         return CHD_E_NN_MODEL_LOAD;

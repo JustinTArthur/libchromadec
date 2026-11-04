@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -40,17 +41,25 @@ struct SessionOptions {
     chd_nn_compute_precision_t precision = CHD_NN_PRECISION_FP32;
 };
 
+// Thrown when no execution provider in the requested chain could be attached,
+// as distinct from a model that fails to load or a session that fails to build.
+class ProviderAttachError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 class OrtSession {
 public:
     // Load an ONNX model from `modelPath`, attaching execution providers
     // per `opts.requestedProvider` (using the auto chain when AUTO).
-    // Throws std::runtime_error on failure with a detailed message.
+    // Throws ProviderAttachError when the provider cannot be attached and
+    // std::runtime_error for any other failure, each with a detailed message.
     OrtSession(const std::string &modelPath, const SessionOptions &opts);
 
     // Load an ONNX model from `modelSize` bytes at `modelData` — for callers
     // that embed the model rather than shipping a file. ORT copies the bytes
     // during construction, so the buffer need not outlive this call.
-    // Throws std::runtime_error on failure with a detailed message.
+    // Throws as the file constructor does.
     OrtSession(const void *modelData, size_t modelSize, const SessionOptions &opts);
 
     OrtSession(const OrtSession &) = delete;

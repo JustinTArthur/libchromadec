@@ -102,7 +102,7 @@ Ort::SessionOptions OrtSession::prepareSessionOptions(const SessionOptions &opts
     chd_nn_backend_t attached = CHD_NN_ORT_CPU;
     if (!attachProviderChain(sessionOptions, chain, cache, opts.precision,
                              &attached, &attachError)) {
-        throw std::runtime_error("provider attach failed: " + attachError);
+        throw ProviderAttachError("provider attach failed: " + attachError);
     }
     activeBackend_ = attached;
     return sessionOptions;

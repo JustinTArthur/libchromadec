@@ -236,6 +236,31 @@ int testLoadRealModel() {
     return 0;
 }
 
+int testPinnedProviderAbsent() {
+    // A pinned provider this platform never has must fail the load as
+    // unavailable, not as a bad model, and must not fall back to CPU.
+    if (chd_has_feature("onnxruntime") != 1) return 0;
+    const std::string modelPath = chd_test::syntheticFixture();
+    if (modelPath.empty()) return 0;
+    chd_nn_session_opts_t opts{};
+    chd_nn_session_opts_default(&opts);
+#if defined(_WIN32)
+    opts.backend = CHD_NN_ORT_COREML;
+#else
+    opts.backend = CHD_NN_ORT_DIRECTML;
+#endif
+    chd_nn_model_t *m = nullptr;
+    REQUIRE(chd_nn_model_load_from_file(modelPath.c_str(), &opts, &m)
+            == CHD_E_NN_BACKEND_UNAVAILABLE);
+    REQUIRE(m == nullptr);
+    std::vector<char> bytes = chd_test::readFileBytes(modelPath);
+    REQUIRE(!bytes.empty());
+    REQUIRE(chd_nn_model_load_from_memory(bytes.data(), bytes.size(), &opts, &m)
+            == CHD_E_NN_BACKEND_UNAVAILABLE);
+    REQUIRE(m == nullptr);
+    return 0;
+}
+
 int testCoreMLLoad() {
     // Native CoreML is now selected through the unified loader by pinning
     // opts.backend = CHD_NN_COREML (or by passing a .mlpackage under AUTO).
@@ -312,6 +337,7 @@ int main() {
     rc |= testLoadNonexistentModel();
     rc |= testLoadFromMemoryInvalid();
     rc |= testLoadRealModel();
+    rc |= testPinnedProviderAbsent();
     rc |= testCoreMLLoad();
     rc |= testFreeNullHandle();
     rc |= testGetActiveProviderNull();

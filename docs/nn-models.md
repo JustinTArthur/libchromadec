@@ -64,7 +64,7 @@ See [shipping on Windows](integration-guide.md#shipping-on-windows) for which
 DLLs then have to travel with your binary.
 
 Pinning a specific `CHD_NN_ORT_*` provider tries only that one and returns
-`CHD_E_NN_BACKEND_UNAVAILABLE` if it is not present. Probe ahead of time with
+`CHD_E_NN_BACKEND_UNAVAILABLE` if it is not present or fails to attach. Probe ahead of time with
 [`chd_nn_backend_is_available`](api-reference.md#chd_nn_backend_is_available),
 and read the backend actually chosen with
 [`chd_nn_model_get_active_backend`](api-reference.md#chd_nn_model_get_active_backend)

@@ -1753,7 +1753,9 @@ a per-backend limitation.
 `opts_or_null` of `NULL` uses [defaults](#chd_nn_session_opts_default). On
 `CHD_E_NN_BACKEND_UNAVAILABLE` the pinned backend isn't available in this
 build/host (e.g. `CHD_NN_COREML` on a non-Apple build, or one configured with
-`-Dwith_coreml=disabled` — detect at runtime with `chd_has_feature("coreml")`);
+`-Dwith_coreml=disabled` — detect at runtime with `chd_has_feature("coreml")`),
+or a pinned `CHD_NN_ORT_*` provider is present but failed to attach; the
+[last error](#chd_last_error) says which.
 `CHD_E_NN_MODEL_LOAD` indicates a bad or unreadable model. The native CoreML
 `.mlpackage` is produced offline from the ONNX model with `coremltools` (see
 `scripts/convert_coreml.py`) and is not shipped with the library. Remember
