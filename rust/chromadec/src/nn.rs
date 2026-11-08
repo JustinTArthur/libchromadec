@@ -70,6 +70,8 @@ pub fn backend_is_available(backend: NnBackend) -> bool {
 /// Where to find the library that provides `backend` as an ONNX Runtime
 /// plugin execution provider (`chd_nn_backend_set_library_path`); `None`
 /// restores automatic discovery. Process wide, for models loaded afterwards.
+/// Only `NnBackend::OrtMigraphx` has a plugin form, on Linux; anything else
+/// returns `Status::Unsupported`.
 pub fn backend_set_library_path(backend: NnBackend, path: Option<&Path>) -> Result<()> {
     let path = path.map(path_to_cstring).transpose()?;
     unsafe {
