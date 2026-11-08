@@ -44,11 +44,13 @@ raw FFI.
    installing.
 
 The pkg-config probe is constrained to the libchromadec versions the bindings
-are ABI-compatible with, and fails rather than binding to a library outside it.
-The range follows the C library's ABI boundary (see
+work with, and fails rather than binding to a library outside them. The upper
+bound follows the C library's ABI boundary (see
 [ABI stability](abi-stability.md)): the minor before 1.0, the major from 1.0 on.
-So `chromadec-sys` 0.1.x accepts libchromadec `>= 0.1.0, < 0.2.0`, and a 1.x
-crate would accept `>= 1.0.0, < 2.0.0`. The bindings are generated from the
+The lower bound is the crate's own version, since an older library can lack
+functions the crate calls. So `chromadec-sys` 0.2.1 accepts libchromadec
+`>= 0.2.1, < 0.3.0`, and a 1.2.0 crate would accept
+`>= 1.2.0, < 2.0.0`. The bindings are generated from the
 headers of whatever the probe finds, so a library outside the range could
 otherwise be bound with mismatched struct layouts or enum numbering.
 

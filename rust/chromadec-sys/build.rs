@@ -13,14 +13,14 @@
 use std::env;
 use std::path::PathBuf;
 
-/// The range of libchromadec versions these bindings are ABI-compatible with,
-/// as `[lower, upper)`.
+/// The range of libchromadec versions these bindings work with, as
+/// `[lower, upper)`.
 ///
 /// libchromadec breaks its ABI at the minor before 1.0 and at the major from
-/// 1.0 on, so a version outside this range is one whose layouts and enum
-/// numbering the generated bindings cannot be trusted against. The range is
-/// derived from this crate's own version, which tracks the C library's, so the
-/// bound cannot be left behind when the version moves.
+/// 1.0 on, which sets the upper bound. Releases inside that range may add
+/// functions, so the lower bound is this crate's own version: an older library
+/// lacks symbols the safe crate calls. Both bounds derive from this crate's
+/// version, which tracks the C library's, so they cannot be left behind.
 fn abi_range() -> (String, String) {
     let major: u64 = env::var("CARGO_PKG_VERSION_MAJOR")
         .expect("CARGO_PKG_VERSION_MAJOR is set by cargo")
@@ -31,10 +31,14 @@ fn abi_range() -> (String, String) {
         .parse()
         .expect("CARGO_PKG_VERSION_MINOR is numeric");
 
+    let lower = env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION is set by cargo");
+    // Drop any pre-release suffix; pkg-config compares the numeric parts.
+    let lower = lower.split(['-', '+']).next().unwrap_or(&lower).to_string();
+
     if major == 0 {
-        (format!("0.{minor}.0"), format!("0.{}.0", minor + 1))
+        (lower, format!("0.{}.0", minor + 1))
     } else {
-        (format!("{major}.0.0"), format!("{}.0.0", major + 1))
+        (lower, format!("{}.0.0", major + 1))
     }
 }
 
@@ -64,7 +68,7 @@ fn main() {
             .unwrap_or_else(|e| {
                 panic!(
                     "no libchromadec in [{abi_low}, {abi_high}) found via pkg-config: {e}\n\
-                     These bindings are ABI-compatible only with that range. Install a matching \
+                     These bindings work only with that range. Install a matching \
                      libchromadec, point PKG_CONFIG_PATH at a build tree's meson-uninstalled \
                      directory, or set CHROMADEC_LIB_DIR and CHROMADEC_INCLUDE_DIR (which skip \
                      the version check)."
