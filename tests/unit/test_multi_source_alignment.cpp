@@ -81,7 +81,9 @@ int main() {
     auto extraA  = makeSource(10, 105);
     auto extraB  = makeSource(10, -1);
 
-    std::vector<LdDecodeMetaData *> sources{primary.get(), extraA.get(), extraB.get()};
+    using Source = chd::dropout::MultiSourceAlignment::Source;
+    std::vector<Source> sources{
+        {primary.get(), true}, {extraA.get(), true}, {extraB.get(), true}};
     chd::dropout::MultiSourceAlignment align(std::move(sources));
 
     // hasVbi reflects which captures carry usable codes.
@@ -117,6 +119,25 @@ int main() {
     REQUIRE(avail.size() == 2);
     REQUIRE(avail[0] == 0);
     REQUIRE(avail[1] == 1);
+
+    // Pairing order is the caller's, not the metadata's. Reversed (second
+    // field opens each frame), field 1 pairs with nothing, so sequential frame
+    // 1 is fields (3, 2) and reads its picture number from first field 3:
+    // disc frame 101. The metadata's own flag stays first-field-first.
+    {
+        std::vector<Source> reversed{{primary.get(), false}, {extraA.get(), false}};
+        chd::dropout::MultiSourceAlignment rev(std::move(reversed));
+        REQUIRE(primary->getIsFirstFieldFirst());
+        REQUIRE(primary->getNumberOfFrames(false) == 9);
+        REQUIRE(primary->getFirstFieldNumber(1, false) == 3);
+        REQUIRE(primary->getSecondFieldNumber(1, false) == 2);
+        REQUIRE(rev.convertSequentialFrameNumberToVbi(1, 0) == 101);
+        REQUIRE(rev.convertSequentialFrameNumberToVbi(1, 1) == 106);
+        // Disc 106 is the reversed primary's frame 6 and extra A's frame 1;
+        // disc 105 (the reversed primary's frame 5) is before extra A's range.
+        REQUIRE(rev.sourceFrameForPrimaryFrame(6, 1) == 1);
+        REQUIRE(rev.sourceFrameForPrimaryFrame(5, 1) == -1);
+    }
 
     std::cout << "test_multi_source_alignment: all assertions passed\n";
     return 0;

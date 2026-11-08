@@ -35,8 +35,8 @@ namespace chd::dropout {
 
 using chd::metadata::LdDecodeMetaData;
 
-MultiSourceAlignment::MultiSourceAlignment(std::vector<chd::metadata::LdDecodeMetaData *> sources)
-    : ldDecodeMetaData(std::move(sources))
+MultiSourceAlignment::MultiSourceAlignment(std::vector<Source> sources)
+    : sources(std::move(sources))
 {
     setMinAndMaxVbiFrames();
 }
@@ -74,7 +74,7 @@ int32_t MultiSourceAlignment::sourceFrameForPrimaryFrame(int32_t frameNumber, in
 void MultiSourceAlignment::setMinAndMaxVbiFrames()
 {
     // Determine the number of sources available
-    int32_t numberOfSources = static_cast<int32_t>(ldDecodeMetaData.size());
+    int32_t numberOfSources = static_cast<int32_t>(sources.size());
 
     // Resize vectors
     sourceHasVbi.resize(numberOfSources);
@@ -97,10 +97,12 @@ void MultiSourceAlignment::setMinAndMaxVbiFrames()
         sourceDiscTypeCav[sourceNumber] = false;
 
         // Using sequential frame numbering starting from 1
-        for (int32_t seqFrame = 1; seqFrame <= ldDecodeMetaData[sourceNumber]->getNumberOfFrames(); seqFrame++) {
+        LdDecodeMetaData &meta = *sources[sourceNumber].metadata;
+        const bool firstFieldFirst = sources[sourceNumber].firstFieldFirst;
+        for (int32_t seqFrame = 1; seqFrame <= meta.getNumberOfFrames(firstFieldFirst); seqFrame++) {
             // Get the VBI data and then decode
-            auto vbi1 = ldDecodeMetaData[sourceNumber]->getFieldVbi(ldDecodeMetaData[sourceNumber]->getFirstFieldNumber(seqFrame)).vbiData;
-            auto vbi2 = ldDecodeMetaData[sourceNumber]->getFieldVbi(ldDecodeMetaData[sourceNumber]->getSecondFieldNumber(seqFrame)).vbiData;
+            auto vbi1 = meta.getFieldVbi(meta.getFirstFieldNumber(seqFrame, firstFieldFirst)).vbiData;
+            auto vbi2 = meta.getFieldVbi(meta.getSecondFieldNumber(seqFrame, firstFieldFirst)).vbiData;
             VbiDecoder::Vbi vbi = vbiDecoder.decodeFrame(vbi1[0], vbi1[1], vbi1[2], vbi2[0], vbi2[1], vbi2[2]);
 
             // Look for a complete, valid CAV picture number or CLV time-code
@@ -120,7 +122,7 @@ void MultiSourceAlignment::setMinAndMaxVbiFrames()
                 timecode.minutes = vbi.clvMin;
                 timecode.seconds = vbi.clvSec;
                 timecode.pictureNumber = vbi.clvPicNo;
-                int32_t cvFrameNumber = ldDecodeMetaData[sourceNumber]->convertClvTimecodeToFrameNumber(timecode);
+                int32_t cvFrameNumber = meta.convertClvTimecodeToFrameNumber(timecode);
 
                 if (cvFrameNumber < clvMin) clvMin = cvFrameNumber;
                 if (cvFrameNumber > clvMax) clvMax = cvFrameNumber;
@@ -177,15 +179,17 @@ int32_t MultiSourceAlignment::convertVbiFrameNumberToSequential(int32_t vbiFrame
 std::vector<int32_t> MultiSourceAlignment::getAvailableSourcesForFrame(int32_t vbiFrameNumber) const
 {
     std::vector<int32_t> availableSourcesForFrame;
-    for (int32_t sourceNo = 0; sourceNo < static_cast<int32_t>(ldDecodeMetaData.size()); sourceNo++) {
+    for (int32_t sourceNo = 0; sourceNo < static_cast<int32_t>(sources.size()); sourceNo++) {
         if (vbiFrameNumber >= sourceMinimumVbiFrame[sourceNo] && vbiFrameNumber <= sourceMaximumVbiFrame[sourceNo]) {
             // Get the field numbers for the frame
-            int32_t firstFieldNumber = ldDecodeMetaData[sourceNo]->getFirstFieldNumber(convertVbiFrameNumberToSequential(vbiFrameNumber, sourceNo));
-            int32_t secondFieldNumber = ldDecodeMetaData[sourceNo]->getSecondFieldNumber(convertVbiFrameNumberToSequential(vbiFrameNumber, sourceNo));
+            LdDecodeMetaData &meta = *sources[sourceNo].metadata;
+            const bool firstFieldFirst = sources[sourceNo].firstFieldFirst;
+            int32_t firstFieldNumber = meta.getFirstFieldNumber(convertVbiFrameNumberToSequential(vbiFrameNumber, sourceNo), firstFieldFirst);
+            int32_t secondFieldNumber = meta.getSecondFieldNumber(convertVbiFrameNumberToSequential(vbiFrameNumber, sourceNo), firstFieldFirst);
 
             // Ensure the frame is not a padded field (i.e. missing)
-            if (!(ldDecodeMetaData[sourceNo]->getField(firstFieldNumber).pad &&
-                  ldDecodeMetaData[sourceNo]->getField(secondFieldNumber).pad)) {
+            if (!(meta.getField(firstFieldNumber).pad &&
+                  meta.getField(secondFieldNumber).pad)) {
                 availableSourcesForFrame.push_back(sourceNo);
             }
         }

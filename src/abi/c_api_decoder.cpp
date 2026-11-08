@@ -166,7 +166,11 @@ chd_status_t decodeSourceFrame(
     std::once_flag &alignmentOnce,
     int64_t frame_index, chd::output::ComponentFrame &outCF,
     chd::dropout::DropoutCorrectionStats &stats) {
-    const int32_t numFrames = meta.getNumberOfFrames();
+    // Each source pairs its fields by its own as-opened order, swapped by the
+    // decoder's reverse_field_order, so the luma and chroma planes and every
+    // extra source agree on which field is "first".
+    const bool firstFieldFirst = d->firstFieldFirst(meta);
+    const int32_t numFrames = meta.getNumberOfFrames(firstFieldFirst);
     if (frame_index < 0 || frame_index >= numFrames) {
         chd::detail::set_last_error("chd_decode_frame: frame_index out of range");
         return CHD_E_OUT_OF_RANGE;
@@ -179,7 +183,7 @@ chd_status_t decodeSourceFrame(
     int32_t endIndex   = 0;
     const int32_t firstFrameNumber = static_cast<int32_t>(frame_index) + 1;
     chd::decoders::SourceField::loadFields(
-        source, meta, firstFrameNumber, /*numFrames=*/1, lookBehind, lookAhead,
+        source, meta, firstFieldFirst, firstFrameNumber, /*numFrames=*/1, lookBehind, lookAhead,
         fields, startIndex, endIndex);
 
     // Apply dropout correction if requested. Single-source if no extras
@@ -193,10 +197,13 @@ chd_status_t decodeSourceFrame(
         // (read-only) across workers.
         if (!extraSources.empty()) {
             std::call_once(alignmentOnce, [&] {
-                std::vector<chd::metadata::LdDecodeMetaData *> sources;
+                std::vector<chd::dropout::MultiSourceAlignment::Source> sources;
                 sources.reserve(extraSources.size() + 1);
-                sources.push_back(&meta);  // this plane's capture is source 0
-                for (auto &ex : extraSources) sources.push_back(ex.metadata.get());
+                // This plane's capture is source 0.
+                sources.push_back({&meta, firstFieldFirst});
+                for (auto &ex : extraSources) {
+                    sources.push_back({ex.metadata.get(), d->firstFieldFirst(*ex.metadata)});
+                }
                 alignment =
                     std::make_unique<chd::dropout::MultiSourceAlignment>(std::move(sources));
             });
@@ -207,7 +214,8 @@ chd_status_t decodeSourceFrame(
         for (size_t i = 0; i < extraSources.size(); ++i) {
             auto &ex = extraSources[i];
             if (ex.metadata == nullptr || ex.source == nullptr) continue;
-            const int32_t exFrames = ex.metadata->getNumberOfFrames();
+            const bool exFirstFieldFirst = d->firstFieldFirst(*ex.metadata);
+            const int32_t exFrames = ex.metadata->getNumberOfFrames(exFirstFieldFirst);
 
             // Map the primary frame to the matching disc frame in this source
             // (by VBI CAV/CLV number where available, positionally otherwise).
@@ -218,8 +226,8 @@ chd_status_t decodeSourceFrame(
                 // this frame rather than padding with black.
                 continue;
             }
-            const int32_t exFirst  = ex.metadata->getFirstFieldNumber(exFrame);
-            const int32_t exSecond = ex.metadata->getSecondFieldNumber(exFrame);
+            const int32_t exFirst  = ex.metadata->getFirstFieldNumber(exFrame, exFirstFieldFirst);
+            const int32_t exSecond = ex.metadata->getSecondFieldNumber(exFrame, exFirstFieldFirst);
 
             chd::dropout::ExtraSourceFrame esf;
             esf.firstFieldData  = ex.source->getVideoField(exFirst);
@@ -763,16 +771,34 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
         }
     }
 
-    // Apply REVERSE_FIELD_ORDER. Matches upstream ld-chroma-decoder `-r`
-    // flag: flips the metadata-wide isFirstFieldFirst flag, which
-    // SourceField::loadFields consumes via getFirstFieldNumber /
-    // getSecondFieldNumber to swap which physical field is treated as
-    // "first" within each frame. Default (no option, or option=false)
-    // restores still-frame default of first-field-first.
+    // REVERSE_FIELD_ORDER, as the original ld-chroma-decoder `-r` and
+    // ld-dropout-correct `-r`: swap which physical field opens each frame,
+    // relative to the order each source was opened with. It is held on the
+    // decoder and applied per source at decode time; the shared video's
+    // metadata is never written, so other decoders on it are unaffected.
+    bool reverseFieldOrder = false;
     {
         auto it = d->optionMaps.boolean.find(CHD_OPT_REVERSE_FIELD_ORDER);
-        const bool reverse = (it != d->optionMaps.boolean.end()) && it->second;
-        meta->setIsFirstFieldFirst(!reverse);
+        reverseFieldOrder = (it != d->optionMaps.boolean.end()) && it->second;
+    }
+
+    // The planes of a Y/C pair were checked for equal frame counts at open,
+    // under their as-opened order. Their own field labels decide the count
+    // under the swapped order, so check again; a mismatch would otherwise
+    // fail only on the last frame's chroma decode.
+    if (d->video->chromaMetadata != nullptr) {
+        auto &chromaMeta = *d->video->chromaMetadata;
+        const int32_t lumaFrames =
+            meta->getNumberOfFrames(meta->getIsFirstFieldFirst() != reverseFieldOrder);
+        const int32_t chromaFrames =
+            chromaMeta.getNumberOfFrames(chromaMeta.getIsFirstFieldFirst() != reverseFieldOrder);
+        if (lumaFrames != chromaFrames) {
+            chd::detail::set_last_error(
+                "chd_decoder_commit: with this field order the luma and chroma planes pair into "
+                "different frame counts (" + std::to_string(lumaFrames) + " vs "
+                + std::to_string(chromaFrames) + ")");
+            return CHD_E_FORMAT_UNSUPPORTED;
+        }
     }
 
     // Padding surrounds the crop rather than widening it, so vp is final here:
@@ -786,6 +812,7 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
         // span/mask queries and chd_decoder_get_output_info read this state;
         // chd_decode_frame is rejected.
         d->resolvedKind      = CHD_DEC_NONE;
+        d->reverseFieldOrder = reverseFieldOrder;
         d->videoParameters   = vp;
         d->outputConfig      = outCfg;
         d->outputPixelFormat = abiFormat;
@@ -888,6 +915,7 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
     // independent padding choices.
 
     d->resolvedKind = resolved;
+    d->reverseFieldOrder = reverseFieldOrder;
     d->decoders = std::move(built);
     d->decoderMutexes = std::move(builtMutexes);
     d->chromaDecoders = std::move(builtChroma);

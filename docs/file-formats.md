@@ -49,8 +49,8 @@ random-access). The `× 2` is because each sample is two bytes.
 
 Two consecutive fields make an interlaced frame; which field of the pair comes
 first is recorded in the metadata (`isFirstFieldFirst`), not implied by file
-order. (The `reverse_field_order` decoder option flips this; see the
-[option registry](api-reference.md#option-registry).)
+order. (The `reverse_field_order` decoder option flips this for one decoder;
+see the [option registry](api-reference.md#option-registry).)
 
 Because the raster is fixed while the analogue field lengths are not whole
 numbers of lines, each frame pair carries padding. The fields hold temporally

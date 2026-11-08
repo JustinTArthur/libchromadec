@@ -43,8 +43,9 @@ struct SourceField {
     //
     // fields will contain {lookbehind fields... [startIndex] real fields... [endIndex] lookahead fields...}.
     // Fields requested outside the bounds of the file will have dummy metadata and black data.
+    // `firstFieldFirst` is the frame pairing order (see LdDecodeMetaData::getNumberOfFrames).
     static void loadFields(chd::reader::ISource &sourceVideo, chd::metadata::LdDecodeMetaData &ldDecodeMetaData,
-                           int32_t firstFrameNumber, int32_t numFrames,
+                           bool firstFieldFirst, int32_t firstFrameNumber, int32_t numFrames,
                            int32_t lookBehindFrames, int32_t lookAheadFrames,
                            std::vector<SourceField> &fields, int32_t &startIndex, int32_t &endIndex);
 

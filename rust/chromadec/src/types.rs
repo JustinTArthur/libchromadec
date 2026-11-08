@@ -382,9 +382,12 @@ pub struct VideoInfo {
     pub black_16b_ire: i32,
     pub white_16b_ire: i32,
     pub blanking_16b_ire: i32,
+    /// Frames under the as-opened field order. A decoder with
+    /// `REVERSE_FIELD_ORDER` may have one fewer; see `OutputInfo::num_frames`.
     pub num_frames: i64,
     pub is_widescreen: bool,
     pub is_subcarrier_locked: bool,
+    /// The field order the video was opened with; no decoder changes it.
     pub is_first_field_first: bool,
 }
 
@@ -423,6 +426,7 @@ pub struct OutputInfo {
     pub width: i32,
     pub height: i32,
     pub num_planes: i32,
+    /// Frames this decoder can decode, under its own field order.
     pub num_frames: i64,
 }
 

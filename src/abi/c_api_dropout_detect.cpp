@@ -138,7 +138,8 @@ chd_status_t collectSpans(chd_decoder_t *d, int64_t frame_index,
         chd::detail::set_last_error("chromadec dropout query: missing metadata");
         return CHD_E_METADATA_MISSING;
     }
-    const int32_t numFrames = meta->getNumberOfFrames();
+    const bool firstFieldFirst = d->firstFieldFirst(*meta);
+    const int32_t numFrames = meta->getNumberOfFrames(firstFieldFirst);
     if (frame_index < 0 || frame_index >= numFrames) {
         chd::detail::set_last_error("chromadec dropout query: frame_index out of range");
         return CHD_E_OUT_OF_RANGE;
@@ -149,7 +150,7 @@ chd_status_t collectSpans(chd_decoder_t *d, int64_t frame_index,
     int32_t endIndex   = 0;
     const int32_t firstFrameNumber = static_cast<int32_t>(frame_index) + 1;
     chd::decoders::SourceField::loadFields(
-        *d->video->source, *meta,
+        *d->video->source, *meta, firstFieldFirst,
         firstFrameNumber, /*numFrames=*/1, /*lookBehind=*/0, /*lookAhead=*/0,
         fields, startIndex, endIndex);
 
@@ -193,7 +194,9 @@ chd_status_t chd_decoder_get_output_info(const chd_decoder_t *d, chd_output_info
     out->height     = g.height;
     out->num_planes = outputPlaneCount(d->outputPixelFormat);
     chd::metadata::LdDecodeMetaData *meta = d->video->metadata.get();
-    out->num_frames = (meta != nullptr) ? meta->getNumberOfFrames() : 0;
+    // The frames this decoder can decode, under its own field pairing (which
+    // reverse_field_order can make one fewer than chd_video_get_info's).
+    out->num_frames = (meta != nullptr) ? meta->getNumberOfFrames(d->firstFieldFirst(*meta)) : 0;
     return CHD_OK;
 }
 

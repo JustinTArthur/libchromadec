@@ -618,7 +618,8 @@ chd_status_t openYcPair(const std::string &fn, const std::string &lumaPath,
         return set_error(fn + ": luma and chroma have mismatched dimensions",
                          CHD_E_FORMAT_UNSUPPORTED);
     }
-    if (luma->metadata->getNumberOfFrames() != chroma->metadata->getNumberOfFrames()) {
+    if (luma->metadata->getNumberOfFrames(luma->metadata->getIsFirstFieldFirst())
+        != chroma->metadata->getNumberOfFrames(chroma->metadata->getIsFirstFieldFirst())) {
         return set_error(fn + ": luma and chroma have different frame counts",
                          CHD_E_FORMAT_UNSUPPORTED);
     }
@@ -736,11 +737,14 @@ chd_status_t chd_video_get_info(const chd_video_t *v, chd_video_info_t *out) {
     out->black_16b_ire          = vp.black16bIre;
     out->white_16b_ire          = vp.white16bIre;
     out->blanking_16b_ire       = vp.blanking16bIre;
-    // Both TBC and (synthesized) CVBS metadata expose frame count + field
-    // order through the same accessors.
-    out->num_frames         = const_cast<chd_video_t *>(v)->metadata->getNumberOfFrames();
-    out->is_first_field_first =
-        const_cast<chd_video_t *>(v)->metadata->getIsFirstFieldFirst() ? 1 : 0;
+    // The field order and frame count as opened. Both TBC and (synthesized)
+    // CVBS metadata expose them through the same accessors. A decoder's
+    // reverse_field_order never changes them; chd_decoder_get_output_info
+    // reports that decoder's frame count.
+    auto &meta = *v->metadata;
+    const bool firstFieldFirst = meta.getIsFirstFieldFirst();
+    out->num_frames           = meta.getNumberOfFrames(firstFieldFirst);
+    out->is_first_field_first = firstFieldFirst ? 1 : 0;
     out->is_widescreen          = vp.isWidescreen ? 1 : 0;
     out->is_subcarrier_locked   = vp.isSubcarrierLocked ? 1 : 0;
     return CHD_OK;

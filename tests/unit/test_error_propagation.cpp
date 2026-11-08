@@ -288,8 +288,8 @@ int testFieldAccessorsAreBounded() {
 
     // A frame number that cannot resolve reports the sentinel rather than
     // looking a field up with it.
-    REQUIRE(meta.getFirstFieldNumber(0) == -1);
-    REQUIRE(meta.getSecondFieldNumber(0) == -1);
+    REQUIRE(meta.getFirstFieldNumber(0, true) == -1);
+    REQUIRE(meta.getSecondFieldNumber(0, true) == -1);
     return 0;
 }
 

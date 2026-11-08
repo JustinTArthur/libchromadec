@@ -172,7 +172,8 @@ typedef struct chd_chroma_ident_report {
 /* Committed output framing, reported by chd_decoder_get_output_info. width and
  * height are the active picture crop plus any black border CHD_OPT_PADDING_MULTIPLE
  * adds around it: the same dimensions chd_decode_frame produces and the
- * coordinate space dropout spans are expressed in. */
+ * coordinate space dropout spans are expressed in. num_frames is this decoder's
+ * count, under its own field order. */
 typedef struct chd_output_info {
     chd_pixel_format_t format;
     int32_t  width;

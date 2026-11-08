@@ -799,13 +799,12 @@ int testActiveLineSidecarOverride(const fs::path &dir) {
 
 // ─── Test 5: CHD_OPT_REVERSE_FIELD_ORDER. ──────────────────────────────────
 //
-// Matches upstream ld-chroma-decoder `-r`: chd_decoder_commit flips the
-// metadata's isFirstFieldFirst flag. The fixture has 6 sequential fields
-// with isFirstField alternating (1,0,1,0,1,0). With the default flag,
-// getNumberOfFrames() = 3 and is_first_field_first = 1. After commit with
-// REVERSE_FIELD_ORDER, the flag flips and getNumberOfFrames() reports 2
-// (field 0 is now treated as a leftover that doesn't open a still-frame),
-// observable via a fresh chd_video_get_info call.
+// Matches the original ld-chroma-decoder `-r`: the decoder pairs each frame
+// second field first. The fixture has 6 sequential fields with isFirstField
+// alternating (1,0,1,0,1,0), so first-field-first pairing gives 3 frames and
+// reversed pairing gives 2 (field 1 opens no frame). The reversal belongs to
+// the decoder: the video keeps reporting its as-opened order, and another
+// decoder on the same video keeps the default pairing.
 int testReverseFieldOrder(const fs::path &dir) {
     const std::string tbc     = (dir / "rev.tbc").string();
     const std::string sidecar = (dir / "rev.tbc.db").string();
@@ -833,20 +832,39 @@ int testReverseFieldOrder(const fs::path &dir) {
     REQUIRE(chd_decoder_set_option_i32(dec, CHD_OPT_PADDING_MULTIPLE, 1) == CHD_OK);
     REQUIRE(chd_decoder_commit(dec) == CHD_OK);
 
-    // After commit, the metadata flag should be flipped. Both observable
-    // effects: num_frames drops by 1 (the leftover field doesn't form a
-    // frame) and is_first_field_first toggles.
+    // The reversed decoder decodes one frame fewer; the video is untouched.
+    chd_output_info_t out{};
+    REQUIRE(chd_decoder_get_output_info(dec, &out) == CHD_OK);
+    REQUIRE(out.num_frames == 2);
     chd_video_info_t info2;
     REQUIRE(chd_video_get_info(video, &info2) == CHD_OK);
-    REQUIRE(info2.num_frames == 2);
-    REQUIRE(info2.is_first_field_first == 0);
+    REQUIRE(info2.num_frames == 3);
+    REQUIRE(info2.is_first_field_first == 1);
 
-    // Decode still succeeds against the reversed assignment (black either way).
+    // A second decoder on the same video, committed without the option, keeps
+    // first-field-first pairing, and does not disturb the reversed one.
+    chd_decoder_t *plain = nullptr;
+    REQUIRE(chd_decoder_create(video, CHD_DEC_MONO, &plain) == CHD_OK);
+    REQUIRE(chd_decoder_commit(plain) == CHD_OK);
+    chd_output_info_t plainOut{};
+    REQUIRE(chd_decoder_get_output_info(plain, &plainOut) == CHD_OK);
+    REQUIRE(plainOut.num_frames == 3);
+    REQUIRE(chd_decoder_get_output_info(dec, &out) == CHD_OK);
+    REQUIRE(out.num_frames == 2);
+
+    // Each decoder's range follows its own pairing: frame 2 exists only
+    // first-field-first.
     chd_frame_t *frame = nullptr;
-    REQUIRE(chd_decode_frame(dec, 0, &frame) == CHD_OK);
+    REQUIRE(chd_decode_frame(dec, 1, &frame) == CHD_OK);
+    REQUIRE(frame != nullptr);
+    chd_frame_free(frame);
+    frame = nullptr;
+    REQUIRE(chd_decode_frame(dec, 2, &frame) == CHD_E_OUT_OF_RANGE);
+    REQUIRE(chd_decode_frame(plain, 2, &frame) == CHD_OK);
     REQUIRE(frame != nullptr);
     chd_frame_free(frame);
 
+    chd_decoder_free(plain);
     chd_decoder_free(dec);
     chd_video_free(video);
     fs::remove(tbc);
@@ -1248,6 +1266,72 @@ int testYcMergeDualTbc(const fs::path &dir) {
     fs::remove(orcLuma);
     fs::remove(orcChroma);
     fs::remove(orcDb);
+    return 0;
+}
+
+// ─── Test: a CVBS pair's open-time field order survives commit. ───────────
+//
+// Opened with is_second_field_first, the synthesized metadata labels field 1
+// a second field and pairs (1,2), (3,4), (5,6): 3 frames from 6 fields. A
+// decoder without reverse_field_order must keep that pairing on both planes,
+// so every frame decodes. With reverse_field_order both planes pair (2,3),
+// (4,5): 2 frames. Neither decoder changes what the video reports.
+int testCvbsFieldOrderSurvivesCommit(const fs::path &dir) {
+    const std::string lumaPath   = (dir / "order.cvbsy").string();
+    const std::string chromaPath = (dir / "order.cvbsc").string();
+    constexpr size_t numSamples = static_cast<size_t>(1135) * 313 * 6;
+    REQUIRE(writeUniformCvbs(lumaPath, numSamples, 256));
+    REQUIRE(writeUniformCvbs(chromaPath, numSamples, 512));
+
+    chd_video_params_t params{};
+    params.standard              = CHD_STD_PAL;
+    params.encoding              = CHD_ENC_CVBS_U10_4FSC;
+    params.signal_state          = CHD_SIG_STANDARD_TBC_LOCKED;
+    params.layout                = CHD_FRAME_LAYOUT_FIELD_RASTER;
+    params.is_second_field_first = 1;
+
+    chd_video_t *video = nullptr;
+    REQUIRE(chd_video_open_yc(lumaPath.c_str(), chromaPath.c_str(), nullptr, &params, &video)
+            == CHD_OK);
+    chd_video_info_t info{};
+    REQUIRE(chd_video_get_info(video, &info) == CHD_OK);
+    REQUIRE(info.is_first_field_first == 0);
+    REQUIRE(info.num_frames == 3);
+
+    auto commitAndCheck = [&](bool reverse, int64_t expectFrames) {
+        chd_decoder_t *dec = nullptr;
+        REQUIRE(chd_decoder_create(video, CHD_DEC_PAL_2D, &dec) == CHD_OK);
+        REQUIRE(chd_decoder_set_option_i32(dec, CHD_OPT_PADDING_MULTIPLE, 1) == CHD_OK);
+        REQUIRE(chd_decoder_set_option_i32(dec, CHD_OPT_THREAD_COUNT, 1) == CHD_OK);
+        if (reverse) {
+            REQUIRE(chd_decoder_set_option_bool(dec, CHD_OPT_REVERSE_FIELD_ORDER, 1) == CHD_OK);
+        }
+        REQUIRE(chd_decoder_commit(dec) == CHD_OK);
+        chd_output_info_t out{};
+        REQUIRE(chd_decoder_get_output_info(dec, &out) == CHD_OK);
+        REQUIRE(out.num_frames == expectFrames);
+
+        // The last frame decodes on both planes; the next is out of range.
+        chd_frame_t *frame = nullptr;
+        REQUIRE(chd_decode_frame(dec, expectFrames - 1, &frame) == CHD_OK);
+        REQUIRE(frame != nullptr);
+        chd_frame_free(frame);
+        frame = nullptr;
+        REQUIRE(chd_decode_frame(dec, expectFrames, &frame) == CHD_E_OUT_OF_RANGE);
+        chd_decoder_free(dec);
+
+        chd_video_info_t after{};
+        REQUIRE(chd_video_get_info(video, &after) == CHD_OK);
+        REQUIRE(after.is_first_field_first == 0);
+        REQUIRE(after.num_frames == 3);
+        return 0;
+    };
+    if (int rc = commitAndCheck(/*reverse=*/false, 3); rc != 0) return rc;
+    if (int rc = commitAndCheck(/*reverse=*/true, 2); rc != 0) return rc;
+
+    chd_video_free(video);
+    fs::remove(lumaPath);
+    fs::remove(chromaPath);
     return 0;
 }
 
@@ -1670,6 +1754,7 @@ int main() {
     if (int rc = testPhaseCompensationOptionScope(dir); rc != 0) return rc;
     if (int rc = testYcMergeDualTbc(dir);             rc != 0) return rc;
     if (int rc = testYcCvbsPairKeepsLuma(dir);        rc != 0) return rc;
+    if (int rc = testCvbsFieldOrderSurvivesCommit(dir); rc != 0) return rc;
     if (int rc = testPaddingAndSampleCrop(dir);       rc != 0) return rc;
     if (int rc = testSignalLineConversion(dir);       rc != 0) return rc;
     if (int rc = testStandardSampleConversion(dir);   rc != 0) return rc;

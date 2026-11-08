@@ -374,9 +374,6 @@ int main(void) {
         return 1;
     }
 
-    chd_video_info_t info;
-    chd_video_get_info(video, &info);   /* info.num_frames, standard, etc. */
-
     /* 2. Create a decoder bound to the source. */
     chd_decoder_t *dec = NULL;
     if (chd_decoder_create(video, CHD_DEC_AUTO, &dec) != CHD_OK) {
@@ -395,8 +392,11 @@ int main(void) {
         return 1;
     }
 
-    /* 4. Decode frames by index (random access). */
-    for (int64_t i = 0; i < info.num_frames; i++) {
+    /* 4. Decode frames by index (random access). The decoder's frame count
+     *    follows its own field order. */
+    chd_output_info_t oinfo;
+    chd_decoder_get_output_info(dec, &oinfo);
+    for (int64_t i = 0; i < oinfo.num_frames; i++) {
         chd_frame_t *frame = NULL;
         chd_status_t rc = chd_decode_frame(dec, i, &frame);
         if (rc != CHD_OK) {

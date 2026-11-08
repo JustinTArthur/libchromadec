@@ -134,18 +134,18 @@ bool DecoderPool::process()
     // If no startFrame parameter was specified, set the start frame to 1
     if (startFrame == -1) startFrame = 1;
 
-    if (startFrame > ldDecodeMetaData.getNumberOfFrames()) {
-        chd::log::fail() << "Specified start frame is out of bounds, only" << ldDecodeMetaData.getNumberOfFrames() << "frames available";
+    if (startFrame > ldDecodeMetaData.getNumberOfFrames(ldDecodeMetaData.getIsFirstFieldFirst())) {
+        chd::log::fail() << "Specified start frame is out of bounds, only" << ldDecodeMetaData.getNumberOfFrames(ldDecodeMetaData.getIsFirstFieldFirst()) << "frames available";
         return false;
     }
 
     // If no length parameter was specified set the length to the number of available frames
     if (length == -1) {
-        length = ldDecodeMetaData.getNumberOfFrames() - (startFrame - 1);
+        length = ldDecodeMetaData.getNumberOfFrames(ldDecodeMetaData.getIsFirstFieldFirst()) - (startFrame - 1);
     } else {
-        if (length + (startFrame - 1) > ldDecodeMetaData.getNumberOfFrames()) {
-            chd::log::info() << "Specified length of" << length << "exceeds the number of available frames, setting to" << ldDecodeMetaData.getNumberOfFrames() - (startFrame - 1);
-            length = ldDecodeMetaData.getNumberOfFrames() - (startFrame - 1);
+        if (length + (startFrame - 1) > ldDecodeMetaData.getNumberOfFrames(ldDecodeMetaData.getIsFirstFieldFirst())) {
+            chd::log::info() << "Specified length of" << length << "exceeds the number of available frames, setting to" << ldDecodeMetaData.getNumberOfFrames(ldDecodeMetaData.getIsFirstFieldFirst()) - (startFrame - 1);
+            length = ldDecodeMetaData.getNumberOfFrames(ldDecodeMetaData.getIsFirstFieldFirst()) - (startFrame - 1);
         }
     }
 
@@ -249,7 +249,7 @@ bool DecoderPool::getInputFrames(int32_t &startFrameNumber, std::vector<chd::dec
 
     // Load the fields
     chd::decoders::SourceField::loadFields(sourceVideo, ldDecodeMetaData,
-                            startFrameNumber, batchFrames, decoderLookBehind, decoderLookAhead,
+                            ldDecodeMetaData.getIsFirstFieldFirst(), startFrameNumber, batchFrames, decoderLookBehind, decoderLookAhead,
                             fields, startIndex, endIndex);
 
     return true;

@@ -500,12 +500,13 @@ typedef struct chd_video_params {
 
 Read-back description of an opened video, filled by
 [`chd_video_get_info`](#chd_video_get_info). Superset of the params struct:
-adds the derived `fsc_hz` subcarrier frequency, the decodable `num_frames`
-count, and `samples_per_frame`, the standard's native frame total (PAL
-709,379; NTSC 477,750; PAL-M 477,225) regardless of container layout, while
-`field_width` and `field_height` describe the served field raster. `layout`
-is always the resolved value, never `CHD_FRAME_LAYOUT_UNKNOWN`. For
-frame-native sources, `first_active_sample` / `last_active_sample` follow the
+adds the derived `fsc_hz` subcarrier frequency, the `num_frames` count under
+the as-opened field order, and `samples_per_frame`, the standard's native
+frame total (PAL 709,379; NTSC 477,750; PAL-M 477,225) regardless of container
+layout, while `field_width` and `field_height` describe the served field
+raster. `layout` is always the resolved value, never
+`CHD_FRAME_LAYOUT_UNKNOWN`. For frame-native sources, `first_active_sample` /
+`last_active_sample` follow the
 [horizontal alignment](file-formats.md#container-layouts) measured from the
 capture's own sync at open time.
 
@@ -686,7 +687,8 @@ typedef struct chd_output_info {
 The committed output framing, filled by
 [`chd_decoder_get_output_info`](#chd_decoder_get_output_info): the `width` and
 `height` of an emitted frame (the dimensions a decoded frame or a dropout mask
-fills), the pixel `format` and its `num_planes`, and the source `num_frames`.
+fills), the pixel `format` and its `num_planes`, and `num_frames`, the frames
+this decoder can decode under its own field order.
 
 A frame is the active-picture crop surrounded by whatever black border
 [`CHD_OPT_PADDING_MULTIPLE`](#option-registry) adds. The two knobs are
@@ -761,9 +763,10 @@ chd_status_t chd_video_get_info(const chd_video_t *v, chd_video_info_t *out);
 ```
 
 Fill `*out` with the opened video's [info](#chd_video_info_t). Note that
-`num_frames` and `is_first_field_first` reflect the field order in effect; a
-decoder's `reverse_field_order` option can change the decodable frame count
-(see the [option registry](#option-registry)).
+`num_frames` and `is_first_field_first` describe the video as opened, and no
+decoder changes them. A decoder's `reverse_field_order` option can make that
+decoder's frame count one smaller; read it from
+[`chd_decoder_get_output_info`](#chd_decoder_get_output_info).
 
 ### chd_video_frame_line_to_signal_line / chd_video_signal_line_to_frame_line
 
@@ -965,7 +968,7 @@ and any decoder-kind restriction.
 | `CHD_OPT_CHROMA_NR_LEVEL`           | f64  | Chroma noise reduction.                                                                                                      |
 | `CHD_OPT_LUMA_NR_LEVEL`             | f64  | Luma noise reduction.                                                                                                        |
 | `CHD_OPT_PADDING_MULTIPLE`          | i32  | Round both frame axes up to this multiple with a black border (default `1` = no padding). Never moves the crop.               |
-| `CHD_OPT_REVERSE_FIELD_ORDER`       | bool | Swap field order (matches `ld-chroma-decoder -r`).                                                                           |
+| `CHD_OPT_REVERSE_FIELD_ORDER`       | bool | Swap field order for this decoder only, relative to the opened order (matches `ld-chroma-decoder -r`).                        |
 | `CHD_OPT_PHASE_COMPENSATION`        | bool | NTSC phase compensation; comb and ldzeug2 kinds. See [Phase compensation](#phase-compensation).                              |
 | `CHD_OPT_COMB_ADAPT_THRESHOLD`      | f64  | Adaptive 3D candidate threshold; `CHD_DEC_NTSC_3D` only.                                                                     |
 | `CHD_OPT_COMB_CHROMA_WEIGHT`        | f64  | Adaptive 3D chroma penalty weight; `CHD_DEC_NTSC_3D` only.                                                                   |

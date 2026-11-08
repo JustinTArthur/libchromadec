@@ -1084,15 +1084,18 @@ void LdDecodeMetaData::setNumberOfFields(int32_t numberOfFields)
 //
 // Determining the correct setting of 'isFirstFieldFirst' is therefore outside of
 // the shared-library scope.
+//
+// Here the flag is passed in by the caller rather than read from the object,
+// so each decoder pairs the shared metadata with its own field order.
 
 // Method to get the available number of still-frames
-int32_t LdDecodeMetaData::getNumberOfFrames()
+int32_t LdDecodeMetaData::getNumberOfFrames(bool firstFieldFirst)
 {
     int32_t frameOffset = 0;
 
     // If the first field in the TBC input isn't the expected first field,
     // skip it when counting the number of still-frames
-    if (isFirstFieldFirst) {
+    if (firstFieldFirst) {
         // Expecting first field first
         if (!getField(1).isFirstField) frameOffset = 1;
     } else {
@@ -1111,7 +1114,7 @@ int32_t LdDecodeMetaData::getNumberOfFrames()
 // fail() - nobody is going to be handed a status carrying the reason, and
 // recording it as the thread's error detail would leave a message behind for a
 // call that goes on to succeed.
-int32_t LdDecodeMetaData::getFieldNumber(int32_t frameNumber, int32_t field)
+int32_t LdDecodeMetaData::getFieldNumber(int32_t frameNumber, int32_t field, bool firstFieldFirst)
 {
     int32_t firstFieldNumber = 0;
     int32_t secondFieldNumber = 0;
@@ -1123,7 +1126,7 @@ int32_t LdDecodeMetaData::getFieldNumber(int32_t frameNumber, int32_t field)
     }
 
     // Calculate the first and last fields based on the position in the TBC
-    if (isFirstFieldFirst) {
+    if (firstFieldFirst) {
         // Expecting TBC file to provide still-frames as first field / second field
         firstFieldNumber = (frameNumber * 2) - 1;
         secondFieldNumber = firstFieldNumber + 1;
@@ -1176,15 +1179,15 @@ int32_t LdDecodeMetaData::getFieldNumber(int32_t frameNumber, int32_t field)
 }
 
 // Method to get the first field number based on the frame number
-int32_t LdDecodeMetaData::getFirstFieldNumber(int32_t frameNumber)
+int32_t LdDecodeMetaData::getFirstFieldNumber(int32_t frameNumber, bool firstFieldFirst)
 {
-    return getFieldNumber(frameNumber, 1);
+    return getFieldNumber(frameNumber, 1, firstFieldFirst);
 }
 
 // Method to get the second field number based on the frame number
-int32_t LdDecodeMetaData::getSecondFieldNumber(int32_t frameNumber)
+int32_t LdDecodeMetaData::getSecondFieldNumber(int32_t frameNumber, bool firstFieldFirst)
 {
-    return getFieldNumber(frameNumber, 2);
+    return getFieldNumber(frameNumber, 2, firstFieldFirst);
 }
 
 // Method to set the isFirstFieldFirst flag

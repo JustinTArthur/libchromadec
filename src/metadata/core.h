@@ -266,10 +266,17 @@ public:
 
     void setNumberOfFields(int32_t numberOfFields);
     int32_t getNumberOfFields();
-    int32_t getNumberOfFrames();
-    int32_t getFirstFieldNumber(int32_t frameNumber);
-    int32_t getSecondFieldNumber(int32_t frameNumber);
+    // Frame pairing. `firstFieldFirst` is the caller's pairing order, not
+    // read from this object: a decoder resolves it per source (the source's
+    // as-opened order, swapped by reverse_field_order), so decoders sharing
+    // one opened video can pair its fields differently.
+    int32_t getNumberOfFrames(bool firstFieldFirst);
+    int32_t getFirstFieldNumber(int32_t frameNumber, bool firstFieldFirst);
+    int32_t getSecondFieldNumber(int32_t frameNumber, bool firstFieldFirst);
 
+    // The pairing order the source was opened with: true for an ld-decode
+    // sidecar, the caller's is_second_field_first override for synthesized
+    // CVBS metadata. Set only while opening.
     void setIsFirstFieldFirst(bool flag);
     bool getIsFirstFieldFirst();
 
@@ -295,7 +302,7 @@ private:
     bool readJsonImpl(const std::string &fileName);
 
     void initialiseVideoSystemParameters();
-    int32_t getFieldNumber(int32_t frameNumber, int32_t field);
+    int32_t getFieldNumber(int32_t frameNumber, int32_t field, bool firstFieldFirst);
     void generatePcmAudioMap();
 };
 

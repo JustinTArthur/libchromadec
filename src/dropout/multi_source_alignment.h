@@ -43,10 +43,17 @@ namespace chd::dropout {
 class MultiSourceAlignment
 {
 public:
+    // One capture and the frame pairing order to read it with (see
+    // LdDecodeMetaData::getNumberOfFrames).
+    struct Source {
+        chd::metadata::LdDecodeMetaData *metadata;
+        bool firstFieldFirst;
+    };
+
     // sources[0] is the primary capture; sources[1..] are additional captures.
     // Scans every field's VBI to determine each source's disc type and the
     // range of VBI frame numbers it covers.
-    explicit MultiSourceAlignment(std::vector<chd::metadata::LdDecodeMetaData *> sources);
+    explicit MultiSourceAlignment(std::vector<Source> sources);
 
     // True if the source carried valid CAV picture numbers or CLV time-codes.
     bool hasVbi(int32_t sourceNumber) const;
@@ -63,7 +70,7 @@ public:
 private:
     void setMinAndMaxVbiFrames();
 
-    std::vector<chd::metadata::LdDecodeMetaData *> ldDecodeMetaData;
+    std::vector<Source> sources;
 
     // Per-source VBI frame information, indexed by source number.
     std::vector<bool> sourceHasVbi;

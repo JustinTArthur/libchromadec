@@ -31,7 +31,7 @@
 namespace chd::decoders {
 
 void SourceField::loadFields(chd::reader::ISource &sourceVideo, chd::metadata::LdDecodeMetaData &ldDecodeMetaData,
-                             int32_t firstFrameNumber, int32_t numFrames,
+                             bool firstFieldFirst, int32_t firstFrameNumber, int32_t numFrames,
                              int32_t lookBehindFrames, int32_t lookAheadFrames,
                              std::vector<SourceField> &fields, int32_t &startIndex, int32_t &endIndex)
 {
@@ -44,7 +44,7 @@ void SourceField::loadFields(chd::reader::ISource &sourceVideo, chd::metadata::L
     fields.resize(endIndex + (2 * lookAheadFrames));
 
     // Populate fields
-    const int32_t numInputFrames = ldDecodeMetaData.getNumberOfFrames();
+    const int32_t numInputFrames = ldDecodeMetaData.getNumberOfFrames(firstFieldFirst);
     const int32_t numMetadataFields = ldDecodeMetaData.getNumberOfFields();
     const int32_t numSourceFields = sourceVideo.getNumberOfAvailableFields();
     bool warnedMetadataFieldRange = false;
@@ -58,8 +58,8 @@ void SourceField::loadFields(chd::reader::ISource &sourceVideo, chd::metadata::L
 
         // Resolve field numbers for this frame (using frame 1 if outside bounds).
         int32_t metadataFrame = useBlankFrame ? 1 : frameNumber;
-        int32_t firstFieldNumber = ldDecodeMetaData.getFirstFieldNumber(metadataFrame);
-        int32_t secondFieldNumber = ldDecodeMetaData.getSecondFieldNumber(metadataFrame);
+        int32_t firstFieldNumber = ldDecodeMetaData.getFirstFieldNumber(metadataFrame, firstFieldFirst);
+        int32_t secondFieldNumber = ldDecodeMetaData.getSecondFieldNumber(metadataFrame, firstFieldFirst);
 
         const auto fieldNumbersAreMetadataSafe = [numMetadataFields](int32_t firstField, int32_t secondField) {
             return firstField >= 1 && secondField >= 1 && firstField <= numMetadataFields
@@ -91,8 +91,8 @@ void SourceField::loadFields(chd::reader::ISource &sourceVideo, chd::metadata::L
 
             useBlankFrame = true;
             metadataFrame = 1;
-            firstFieldNumber = ldDecodeMetaData.getFirstFieldNumber(metadataFrame);
-            secondFieldNumber = ldDecodeMetaData.getSecondFieldNumber(metadataFrame);
+            firstFieldNumber = ldDecodeMetaData.getFirstFieldNumber(metadataFrame, firstFieldFirst);
+            secondFieldNumber = ldDecodeMetaData.getSecondFieldNumber(metadataFrame, firstFieldFirst);
             metadataFieldRangeInvalid = !fieldNumbersAreMetadataSafe(firstFieldNumber, secondFieldNumber);
         }
 

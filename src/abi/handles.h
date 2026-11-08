@@ -119,6 +119,14 @@ struct chd_decoder {
 
     chd_decoder_kind_t resolvedKind = CHD_DEC_AUTO;
 
+    // CHD_OPT_REVERSE_FIELD_ORDER as committed. Field pairing is decoder
+    // state, never written to the shared video's metadata: each source pairs
+    // by its own as-opened order, swapped when this is set.
+    bool reverseFieldOrder = false;
+    bool firstFieldFirst(chd::metadata::LdDecodeMetaData &meta) const {
+        return meta.getIsFirstFieldFirst() != reverseFieldOrder;
+    }
+
     // Hardening follow-up: N decoder instances, one per worker
     // thread. Each Decoder subclass keeps mutable per-call scratch (Comb
     // FrameBuffer, TransformPal FFTW plans, OutputWriter line buffers)
