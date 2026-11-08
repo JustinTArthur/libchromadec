@@ -67,7 +67,8 @@ bool runCudaPipeline(
     std::vector<std::vector<double>> &nextWeightSum,
     chd::nn::OrtSession &session,
     std::mutex &runMutex,
-    double inputMagnitudeScale);
+    double inputMagnitudeScale,
+    int deviceId);
 
 }  // namespace chd::decoders::nntransform3d
 

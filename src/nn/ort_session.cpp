@@ -93,18 +93,20 @@ Ort::SessionOptions OrtSession::prepareSessionOptions(const SessionOptions &opts
     Ort::SessionOptions sessionOptions;
     applyCommonOptions(sessionOptions, opts);
 
-    EngineCacheConfig cache;
-    cache.dir       = resolveEngineCacheDir(opts);
-    cache.modelPath = cacheModelPath;
+    AttachConfig config;
+    config.cache.dir       = resolveEngineCacheDir(opts);
+    config.cache.modelPath = cacheModelPath;
+    config.precision       = opts.precision;
+    config.deviceId        = opts.deviceId;
 
     const auto chain = buildAutoChain(opts.requestedProvider);
     std::string attachError;
     chd_nn_backend_t attached = CHD_NN_ORT_CPU;
-    if (!attachProviderChain(sessionOptions, chain, cache, opts.precision,
-                             &attached, &attachError)) {
+    if (!attachProviderChain(sessionOptions, chain, config, &attached, &attachError)) {
         throw ProviderAttachError("provider attach failed: " + attachError);
     }
     activeBackend_ = attached;
+    deviceId_      = opts.deviceId;
     return sessionOptions;
 }
 

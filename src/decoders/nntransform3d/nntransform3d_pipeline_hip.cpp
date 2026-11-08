@@ -242,22 +242,31 @@ struct HipThreadCache {
     double *dWinY = nullptr;
     double *dWinX = nullptr;
 
+    // HIP device the plans and buffers were created on; -1 before first use.
+    int device = -1;
     Ort::MemoryInfo memInfo{"Hip", OrtDeviceAllocator, 0, OrtMemTypeDefault};
 
-    ~HipThreadCache() {
-        if (pFwd) hipfftDestroy(pFwd);
-        if (pInv) hipfftDestroy(pInv);
-        if (dInBatch)  hipFree(dInBatch);
-        if (dOutBatch) hipFree(dOutBatch);
-        if (dTrtInput) hipFree(dTrtInput);
-        if (dMask)     hipFree(dMask);
-        if (dLedgerY)  hipFree(dLedgerY);
-        if (dLedgerX)  hipFree(dLedgerX);
-        if (dLedgerDc) hipFree(dLedgerDc);
-        if (dWinT)     hipFree(dWinT);
-        if (dWinY)     hipFree(dWinY);
-        if (dWinX)     hipFree(dWinX);
+    void releaseBatch() {
+        if (pFwd)      { hipfftDestroy(pFwd);  pFwd = 0; }
+        if (pInv)      { hipfftDestroy(pInv);  pInv = 0; }
+        if (dInBatch)  { hipFree(dInBatch);  dInBatch  = nullptr; }
+        if (dOutBatch) { hipFree(dOutBatch); dOutBatch = nullptr; }
+        if (dTrtInput) { hipFree(dTrtInput); dTrtInput = nullptr; }
+        if (dMask)     { hipFree(dMask);     dMask     = nullptr; }
+        if (dLedgerY)  { hipFree(dLedgerY);  dLedgerY  = nullptr; }
+        if (dLedgerX)  { hipFree(dLedgerX);  dLedgerX  = nullptr; }
+        if (dLedgerDc) { hipFree(dLedgerDc); dLedgerDc = nullptr; }
+        cachedNumBlocks = 0;
     }
+
+    void releaseAll() {
+        releaseBatch();
+        if (dWinT) { hipFree(dWinT); dWinT = nullptr; }
+        if (dWinY) { hipFree(dWinY); dWinY = nullptr; }
+        if (dWinX) { hipFree(dWinX); dWinX = nullptr; }
+    }
+
+    ~HipThreadCache() { releaseAll(); }
 };
 
 HipThreadCache &getCache() {
@@ -265,20 +274,27 @@ HipThreadCache &getCache() {
     return cache;
 }
 
+// Every HIP call below goes to the calling thread's current device, and the
+// cached plans and buffers belong to the device they were created on. Select
+// the session's device, releasing the cache on its old device if it moved.
+bool ensureDevice(HipThreadCache &cache, int deviceId) {
+    if (cache.device == deviceId) return true;
+    if (cache.device >= 0) {
+        CHD_HIP_CHECK(hipSetDevice(cache.device));
+        cache.releaseAll();
+    }
+    CHD_HIP_CHECK(hipSetDevice(deviceId));
+    cache.memInfo = Ort::MemoryInfo("Hip", OrtDeviceAllocator, deviceId, OrtMemTypeDefault);
+    cache.device  = deviceId;
+    return true;
+}
+
 bool ensureBatchCapacity(HipThreadCache &cache, int numBlocks) {
     if (cache.cachedNumBlocks == numBlocks && cache.pFwd && cache.pInv) {
         return true;
     }
 
-    if (cache.pFwd)      { hipfftDestroy(cache.pFwd);  cache.pFwd = 0; }
-    if (cache.pInv)      { hipfftDestroy(cache.pInv);  cache.pInv = 0; }
-    if (cache.dInBatch)  { hipFree(cache.dInBatch);  cache.dInBatch  = nullptr; }
-    if (cache.dOutBatch) { hipFree(cache.dOutBatch); cache.dOutBatch = nullptr; }
-    if (cache.dTrtInput) { hipFree(cache.dTrtInput); cache.dTrtInput = nullptr; }
-    if (cache.dMask)     { hipFree(cache.dMask);     cache.dMask     = nullptr; }
-    if (cache.dLedgerY)  { hipFree(cache.dLedgerY);  cache.dLedgerY  = nullptr; }
-    if (cache.dLedgerX)  { hipFree(cache.dLedgerX);  cache.dLedgerX  = nullptr; }
-    if (cache.dLedgerDc) { hipFree(cache.dLedgerDc); cache.dLedgerDc = nullptr; }
+    cache.releaseBatch();
 
     const size_t blockSize = static_cast<size_t>(kNt) * kNy * kNx;
     const size_t batchBytes = sizeof(hipfftDoubleComplex) * numBlocks * blockSize;
@@ -348,7 +364,8 @@ bool runHipPipeline(
     std::vector<std::vector<double>> &nextWeightSum,
     chd::nn::OrtSession &session,
     std::mutex &runMutex,
-    double inputMagnitudeScale)
+    double inputMagnitudeScale,
+    int deviceId)
 {
     const int32_t firstActiveY = videoParameters.firstActiveFrameLine;
     const int32_t lastActiveY  = videoParameters.lastActiveFrameLine;
@@ -376,6 +393,7 @@ bool runHipPipeline(
     std::lock_guard<std::mutex> runLock(runMutex);
 
     auto &cache = getCache();
+    if (!ensureDevice(cache, deviceId))         return false;
     if (!ensureBatchCapacity(cache, numBlocks)) return false;
     if (!ensureWindows(cache))                  return false;
 

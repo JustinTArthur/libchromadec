@@ -1055,7 +1055,8 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
             nextFrame.rawbuffer.data(),
             nnAccChroma, nnWeightSum,
             nextFrame.nnAccChroma, nextFrame.nnWeightSum,
-            ortEngine->ortSession(), runMutex, inputMagnitudeScale);
+            ortEngine->ortSession(), runMutex, inputMagnitudeScale,
+            ortEngine->deviceId());
     }
 #endif
 #if defined(CHD_WITH_ROCM)
@@ -1066,7 +1067,8 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
             nextFrame.rawbuffer.data(),
             nnAccChroma, nnWeightSum,
             nextFrame.nnAccChroma, nextFrame.nnWeightSum,
-            ortEngine->ortSession(), runMutex, inputMagnitudeScale);
+            ortEngine->ortSession(), runMutex, inputMagnitudeScale,
+            ortEngine->deviceId());
     }
 #endif
 

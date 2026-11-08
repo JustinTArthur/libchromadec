@@ -30,7 +30,9 @@ namespace chd::decoders::nntransform3d {
 // Run the nnTransform3D 3D-FFT + CNN-mask + IFFT pipeline on an AMD GPU
 // via HIP + hipFFT. See nntransform3d_pipeline_cuda.h for the parameter
 // semantics — they're identical. `session` must have been built with
-// the ROCm or MIGraphX execution provider attached.
+// the ROCm or MIGraphX execution provider attached, on HIP device
+// `deviceId`; the pipeline's buffers and plans live on that same device
+// so the bound tensors need no copy.
 //
 // Returns true on success. On any HIP / hipFFT / ORT failure, returns
 // false and the caller falls back to the 2D chroma path.
@@ -44,7 +46,8 @@ bool runHipPipeline(
     std::vector<std::vector<double>> &nextWeightSum,
     chd::nn::OrtSession &session,
     std::mutex &runMutex,
-    double inputMagnitudeScale);
+    double inputMagnitudeScale,
+    int deviceId);
 
 }  // namespace chd::decoders::nntransform3d
 

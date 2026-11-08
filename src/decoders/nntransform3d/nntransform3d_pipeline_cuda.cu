@@ -268,27 +268,35 @@ struct CudaThreadCache {
     double *dWinY = nullptr;
     double *dWinX = nullptr;
 
+    // CUDA device the plans and buffers were created on; -1 before first use.
+    int device = -1;
     // CUDA-pointer MemoryInfo reused for every Ort::Value::CreateTensor
     // call. Brace-init avoids a copy of a move-only ORT C++ type.
     Ort::MemoryInfo memInfo{"Cuda", OrtDeviceAllocator, 0, OrtMemTypeDefault};
 
-    ~CudaThreadCache() {
-        // Best-effort cleanup; we don't check return values because we're
-        // in a destructor and CUDA may already be shut down by atexit
-        // sequencing.
-        if (pFwd) cufftDestroy(pFwd);
-        if (pInv) cufftDestroy(pInv);
-        if (dInBatch)  cudaFree(dInBatch);
-        if (dOutBatch) cudaFree(dOutBatch);
-        if (dTrtInput) cudaFree(dTrtInput);
-        if (dMask)     cudaFree(dMask);
-        if (dLedgerY)  cudaFree(dLedgerY);
-        if (dLedgerX)  cudaFree(dLedgerX);
-        if (dLedgerDc) cudaFree(dLedgerDc);
-        if (dWinT)     cudaFree(dWinT);
-        if (dWinY)     cudaFree(dWinY);
-        if (dWinX)     cudaFree(dWinX);
+    // Best-effort cleanup; return values go unchecked because the destructor
+    // may run after CUDA has shut down through atexit sequencing.
+    void releaseBatch() {
+        if (pFwd)      { cufftDestroy(pFwd);  pFwd = 0; }
+        if (pInv)      { cufftDestroy(pInv);  pInv = 0; }
+        if (dInBatch)  { cudaFree(dInBatch);  dInBatch  = nullptr; }
+        if (dOutBatch) { cudaFree(dOutBatch); dOutBatch = nullptr; }
+        if (dTrtInput) { cudaFree(dTrtInput); dTrtInput = nullptr; }
+        if (dMask)     { cudaFree(dMask);     dMask     = nullptr; }
+        if (dLedgerY)  { cudaFree(dLedgerY);  dLedgerY  = nullptr; }
+        if (dLedgerX)  { cudaFree(dLedgerX);  dLedgerX  = nullptr; }
+        if (dLedgerDc) { cudaFree(dLedgerDc); dLedgerDc = nullptr; }
+        cachedNumBlocks = 0;
     }
+
+    void releaseAll() {
+        releaseBatch();
+        if (dWinT) { cudaFree(dWinT); dWinT = nullptr; }
+        if (dWinY) { cudaFree(dWinY); dWinY = nullptr; }
+        if (dWinX) { cudaFree(dWinX); dWinX = nullptr; }
+    }
+
+    ~CudaThreadCache() { releaseAll(); }
 };
 
 CudaThreadCache &getCache() {
@@ -296,20 +304,27 @@ CudaThreadCache &getCache() {
     return cache;
 }
 
+// Every CUDA call below goes to the calling thread's current device, and the
+// cached plans and buffers belong to the device they were created on. Select
+// the session's device, releasing the cache on its old device if it moved.
+bool ensureDevice(CudaThreadCache &cache, int deviceId) {
+    if (cache.device == deviceId) return true;
+    if (cache.device >= 0) {
+        CHD_CUDA_CHECK(cudaSetDevice(cache.device));
+        cache.releaseAll();
+    }
+    CHD_CUDA_CHECK(cudaSetDevice(deviceId));
+    cache.memInfo = Ort::MemoryInfo("Cuda", OrtDeviceAllocator, deviceId, OrtMemTypeDefault);
+    cache.device  = deviceId;
+    return true;
+}
+
 bool ensureBatchCapacity(CudaThreadCache &cache, int numBlocks) {
     if (cache.cachedNumBlocks == numBlocks && cache.pFwd && cache.pInv) {
         return true;
     }
 
-    if (cache.pFwd)      { cufftDestroy(cache.pFwd);  cache.pFwd = 0; }
-    if (cache.pInv)      { cufftDestroy(cache.pInv);  cache.pInv = 0; }
-    if (cache.dInBatch)  { cudaFree(cache.dInBatch);  cache.dInBatch  = nullptr; }
-    if (cache.dOutBatch) { cudaFree(cache.dOutBatch); cache.dOutBatch = nullptr; }
-    if (cache.dTrtInput) { cudaFree(cache.dTrtInput); cache.dTrtInput = nullptr; }
-    if (cache.dMask)     { cudaFree(cache.dMask);     cache.dMask     = nullptr; }
-    if (cache.dLedgerY)  { cudaFree(cache.dLedgerY);  cache.dLedgerY  = nullptr; }
-    if (cache.dLedgerX)  { cudaFree(cache.dLedgerX);  cache.dLedgerX  = nullptr; }
-    if (cache.dLedgerDc) { cudaFree(cache.dLedgerDc); cache.dLedgerDc = nullptr; }
+    cache.releaseBatch();
 
     const size_t blockSize = static_cast<size_t>(kNt) * kNy * kNx;
     const size_t batchBytes = sizeof(cufftDoubleComplex) * numBlocks * blockSize;
@@ -382,7 +397,8 @@ bool runCudaPipeline(
     std::vector<std::vector<double>> &nextWeightSum,
     chd::nn::OrtSession &session,
     std::mutex &runMutex,
-    double inputMagnitudeScale)
+    double inputMagnitudeScale,
+    int deviceId)
 {
     const int32_t firstActiveY = videoParameters.firstActiveFrameLine;
     const int32_t lastActiveY  = videoParameters.lastActiveFrameLine;
@@ -415,6 +431,7 @@ bool runCudaPipeline(
     std::lock_guard<std::mutex> runLock(runMutex);
 
     auto &cache = getCache();
+    if (!ensureDevice(cache, deviceId))         return false;
     if (!ensureBatchCapacity(cache, numBlocks)) return false;
     if (!ensureWindows(cache))                  return false;
 

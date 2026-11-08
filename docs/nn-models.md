@@ -82,6 +82,10 @@ For TensorRT and MIGraphX, set `engine_cache_dir` to avoid recompiling the
 engine on every load (the first compile costs 15-30 s). See
 [session options](api-reference.md#session-options).
 
+`device_id` selects the GPU for the CUDA, TensorRT, MIGraphX and DirectML
+providers; nnTransform3D's device-resident FFT pipelines follow the session's
+device.
+
 ### Native CoreML (macOS)
 
 To run a model on GPU/ANE through CoreML directly — rather than through ONNX

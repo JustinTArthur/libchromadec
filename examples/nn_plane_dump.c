@@ -10,6 +10,7 @@
  *               coreml_native
  *     first, n  first frame index and frame count to decode
  *     -s SCALE  nn_input_magnitude_scale (nnTransform3D; 1.0 v1, 128.0 v2)
+ *     -d DEVICE GPU ordinal for the session (device_id; default 0)
  *     -p PREC   compute precision: fp32 (default) | fp16
  *     -u UNITS  native-CoreML compute units: cpu_and_gpu (default) | all |
  *               cpu_only
@@ -64,10 +65,12 @@ int main(int argc, char **argv)
     const int first = atoi(argv[4]), n = atoi(argv[5]);
 
     double scale = -1.0;
+    int device = 0;
     chd_nn_compute_precision_t precision = CHD_NN_PRECISION_FP32;
     chd_nn_coreml_compute_t units = CHD_NN_COREML_CPU_AND_GPU;
     for (int i = 7; i < argc; ++i) {
         if (!strcmp(argv[i], "-s") && i + 1 < argc) scale = atof(argv[++i]);
+        else if (!strcmp(argv[i], "-d") && i + 1 < argc) device = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-p") && i + 1 < argc) {
             const char *pr = argv[++i];
             if      (!strcmp(pr, "fp32")) precision = CHD_NN_PRECISION_FP32;
@@ -89,6 +92,7 @@ int main(int argc, char **argv)
     chd_nn_session_opts_t nopts;
     chd_nn_session_opts_default(&nopts);
     nopts.backend        = backend;
+    nopts.device_id      = device;
     nopts.precision      = precision;
     nopts.coreml_compute = units;
     chd_nn_model_t *model = NULL;

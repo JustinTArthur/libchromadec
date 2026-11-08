@@ -31,6 +31,7 @@ public:
         const std::vector<std::string> &outputNames) override;
 
     chd_nn_backend_t activeBackend() const override { return session_->activeBackend(); }
+    int32_t deviceId() const { return session_->deviceId(); }
     const std::vector<std::string> &inputNames()  const override { return inputNames_; }
     const std::vector<std::string> &outputNames() const override { return outputNames_; }
 

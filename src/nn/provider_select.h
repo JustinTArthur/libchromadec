@@ -51,6 +51,14 @@ struct EngineCacheConfig {
     std::string modelPath;
 };
 
+// Per-session inputs to the attach helpers. `precision` is read by EPs with
+// a reduced-precision engine mode (TensorRT); `deviceId` by every GPU EP.
+struct AttachConfig {
+    EngineCacheConfig          cache;
+    chd_nn_compute_precision_t precision = CHD_NN_PRECISION_FP32;
+    int32_t                    deviceId  = 0;
+};
+
 // Returns the per-OS auto fallback chain, with the caller's preference
 // (when non-AUTO) prepended at the front of the chain.
 std::vector<ProviderPreference> buildAutoChain(ProviderPreference requested);
@@ -64,9 +72,7 @@ bool providerIsAvailable(ProviderPreference provider);
 // attached provider; writes that provider into `*outAttached`. Returns true
 // on success.
 //
-// `cache` is consulted by EPs that support persistent caching (TRT,
-// MIGraphX). EPs that don't ignore it. `precision` is consulted by EPs
-// with a reduced-precision engine mode (TRT); the rest ignore it.
+// Each provider reads the parts of `config` it supports and ignores the rest.
 //
 // The CPU provider is appended implicitly (ORT's default), so a chain that
 // reaches it always succeeds — but `outAttached` is set to CHD_NN_ORT_CPU.
@@ -76,8 +82,7 @@ bool providerIsAvailable(ProviderPreference provider);
 // description of what was tried and why.
 bool attachProviderChain(Ort::SessionOptions &options,
                          const std::vector<ProviderPreference> &chain,
-                         const EngineCacheConfig &cache,
-                         chd_nn_compute_precision_t precision,
+                         const AttachConfig &config,
                          ProviderPreference *outAttached,
                          std::string *outError);
 
@@ -85,15 +90,16 @@ bool attachProviderChain(Ort::SessionOptions &options,
 // writes `outError`. These are exposed for unit tests; production callers
 // should go through attachProviderChain.
 bool attachCpu(Ort::SessionOptions &options, std::string *outError);
-bool attachCuda(Ort::SessionOptions &options, std::string *outError);
+bool attachCuda(Ort::SessionOptions &options, const AttachConfig &config,
+                std::string *outError);
 bool attachCoreML(Ort::SessionOptions &options, std::string *outError);
-bool attachDirectML(Ort::SessionOptions &options, std::string *outError);
+bool attachDirectML(Ort::SessionOptions &options, const AttachConfig &config,
+                    std::string *outError);
 bool attachTensorRT(Ort::SessionOptions &options,
-                    const EngineCacheConfig &cache,
-                    chd_nn_compute_precision_t precision,
+                    const AttachConfig &config,
                     std::string *outError);
 bool attachMIGraphX(Ort::SessionOptions &options,
-                    const EngineCacheConfig &cache,
+                    const AttachConfig &config,
                     std::string *outError);
 
 // Pin the dlopen'd libraries of the execution provider a session actually

@@ -74,6 +74,9 @@ public:
     // CPU because CUDA wasn't available).
     chd_nn_backend_t activeBackend() const { return activeBackend_; }
 
+    // The GPU ordinal the session's execution provider was asked to run on.
+    int32_t deviceId() const { return deviceId_; }
+
     // Best-effort accessor for input/output metadata. Empty until lazily
     // populated on first call.
     const std::vector<std::string> &inputNames();
@@ -90,6 +93,7 @@ private:
 
     std::unique_ptr<Ort::Session> session_;
     chd_nn_backend_t              activeBackend_ = CHD_NN_ORT_CPU;
+    int32_t                       deviceId_      = 0;
     std::vector<std::string>      inputNames_;
     std::vector<std::string>      outputNames_;
     bool                          ioNamesCached_ = false;

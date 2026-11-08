@@ -1646,6 +1646,10 @@ typedef struct chd_nn_session_opts {
 } chd_nn_session_opts_t;
 ```
 
+`device_id` picks the GPU ordinal for the CUDA, TensorRT, MIGraphX and
+DirectML EPs, and nnTransform3D's device-resident FFT pipelines run on that
+same GPU.
+
 ### Compute precision
 
 ```c

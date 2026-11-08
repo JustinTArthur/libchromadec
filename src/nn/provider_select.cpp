@@ -210,7 +210,8 @@ bool attachCpu(Ort::SessionOptions &, std::string *)
 // (use_tf32, prefer_nhwc, the two tunable_op_*) for older ORT builds
 // that don't recognise them yet. If even the compatibility set has an
 // unsupported option, the regex-driven filter prunes it and retries.
-bool attachCuda(Ort::SessionOptions &options, std::string *outError)
+bool attachCuda(Ort::SessionOptions &options, const AttachConfig &config,
+                std::string *outError)
 {
     std::string driverError;
     if (!ensureCudaDriverLoaded(&driverError)) {
@@ -236,10 +237,11 @@ bool attachCuda(Ort::SessionOptions &options, std::string *outError)
     }
 
     using KV = std::pair<const char *, const char *>;
+    const std::string deviceIdStr = std::to_string(config.deviceId);
 
     // Preferred set — what nnTransform3D was tuned for.
     std::vector<KV> preferred = {
-        { "device_id",                    "0"          },
+        { "device_id",                    deviceIdStr.c_str() },
         { "cudnn_conv_algo_search",       "EXHAUSTIVE" },
         { "cudnn_conv_use_max_workspace", "0"          },
         { "do_copy_in_default_stream",    "1"          },
@@ -251,7 +253,7 @@ bool attachCuda(Ort::SessionOptions &options, std::string *outError)
 
     // Compatibility set — drops the four newest options for older ORT.
     const std::vector<KV> compatibility = {
-        { "device_id",                    "0"          },
+        { "device_id",                    deviceIdStr.c_str() },
         { "cudnn_conv_algo_search",       "EXHAUSTIVE" },
         { "cudnn_conv_use_max_workspace", "0"          },
         { "do_copy_in_default_stream",    "1"          },
@@ -358,12 +360,13 @@ bool attachCoreML(Ort::SessionOptions &options, std::string *outError)
 // onnxruntime.dll actually carries a DirectML.dll to delay-load beside it at
 // runtime. Validated end-to-end (session creation, Run, and profiled node
 // placement showing DmlExecutionProvider) against the Windows ML package.
-bool attachDirectML(Ort::SessionOptions &options, std::string *outError)
+bool attachDirectML(Ort::SessionOptions &options, const AttachConfig &config,
+                    std::string *outError)
 {
 #if defined(_WIN32)
     try {
         std::unordered_map<std::string, std::string> dmlOpts;
-        dmlOpts["device_id"] = "0";
+        dmlOpts["device_id"] = std::to_string(config.deviceId);
         options.AppendExecutionProvider("DML", dmlOpts);
         return true;
     } catch (const std::exception &e) {
@@ -372,6 +375,7 @@ bool attachDirectML(Ort::SessionOptions &options, std::string *outError)
     }
 #else
     (void)options;
+    (void)config;
     if (outError) *outError = "DirectML execution provider is only available on Windows";
     return false;
 #endif
@@ -392,16 +396,16 @@ bool attachDirectML(Ort::SessionOptions &options, std::string *outError)
 // change, so sharing one directory can serve an fp32 engine to an fp16
 // session or vice versa.
 bool attachTensorRT(Ort::SessionOptions &options,
-                    const EngineCacheConfig &cache,
-                    chd_nn_compute_precision_t precision,
+                    const AttachConfig &config,
                     std::string *outError)
 {
+    const EngineCacheConfig &cache = config.cache;
     std::string driverError;
     if (!ensureCudaDriverLoaded(&driverError)) {
         if (outError) *outError = "TensorRT requires CUDA driver: " + driverError;
         return false;
     }
-    const bool fp16 = precision == CHD_NN_PRECISION_FP16_ALLOWED;
+    const bool fp16 = config.precision == CHD_NN_PRECISION_FP16_ALLOWED;
 
     std::string cacheDir = cache.dir;
     if (!cacheDir.empty() && fp16) {
@@ -428,8 +432,11 @@ bool attachTensorRT(Ort::SessionOptions &options,
         return false;
     }
 
+    const std::string deviceIdStr = std::to_string(config.deviceId);
     std::vector<const char *> keys;
     std::vector<const char *> values;
+    keys.push_back("device_id");
+    values.push_back(deviceIdStr.c_str());
     if (fp16) {
         keys.push_back("trt_fp16_enable");
         values.push_back("1");
@@ -474,13 +481,14 @@ bool attachTensorRT(Ort::SessionOptions &options,
 // silently ignored, recognised ones are parsed by the EP's own option
 // reader.
 bool attachMIGraphX(Ort::SessionOptions &options,
-                    const EngineCacheConfig &cache,
+                    const AttachConfig &config,
                     std::string *outError)
 {
 #if defined(__linux__)
+    const EngineCacheConfig &cache = config.cache;
     try {
         std::unordered_map<std::string, std::string> mxOpts;
-        mxOpts["device_id"] = "0";
+        mxOpts["device_id"] = std::to_string(config.deviceId);
         if (!cache.dir.empty()) {
             // migraphx_model_cache_dir is recognised by newer ORT MIGraphX
             // EPs as a directory that the provider manages files inside.
@@ -502,7 +510,7 @@ bool attachMIGraphX(Ort::SessionOptions &options,
     }
 #else
     (void)options;
-    (void)cache;
+    (void)config;
     if (outError) *outError = "MIGraphX execution provider is only available on Linux";
     return false;
 #endif
@@ -584,8 +592,7 @@ void pinProviderLibraries(chd_nn_backend_t provider)
 
 bool attachProviderChain(Ort::SessionOptions &options,
                          const std::vector<ProviderPreference> &chain,
-                         const EngineCacheConfig &cache,
-                         chd_nn_compute_precision_t precision,
+                         const AttachConfig &config,
                          ProviderPreference *outAttached,
                          std::string *outError)
 {
@@ -600,11 +607,11 @@ bool attachProviderChain(Ort::SessionOptions &options,
         std::string err;
         switch (provider) {
             case CHD_NN_ORT_CPU:      ok = attachCpu     (options, &err);        break;
-            case CHD_NN_ORT_CUDA:     ok = attachCuda    (options, &err);        break;
+            case CHD_NN_ORT_CUDA:     ok = attachCuda    (options, config, &err); break;
             case CHD_NN_ORT_COREML:   ok = attachCoreML  (options, &err);        break;
-            case CHD_NN_ORT_DIRECTML: ok = attachDirectML(options, &err);        break;
-            case CHD_NN_ORT_TENSORRT: ok = attachTensorRT(options, cache, precision, &err); break;
-            case CHD_NN_ORT_MIGRAPHX: ok = attachMIGraphX(options, cache, &err); break;
+            case CHD_NN_ORT_DIRECTML: ok = attachDirectML(options, config, &err); break;
+            case CHD_NN_ORT_TENSORRT: ok = attachTensorRT(options, config, &err); break;
+            case CHD_NN_ORT_MIGRAPHX: ok = attachMIGraphX(options, config, &err); break;
             default:
                 // AUTO sentinels and non-ORT backends can't appear in a
                 // resolved ORT chain.
