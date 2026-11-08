@@ -86,6 +86,45 @@ engine on every load (the first compile costs 15-30 s). See
 providers; nnTransform3D's device-resident FFT pipelines follow the session's
 device.
 
+### Plugin execution providers
+
+From ROCm 10, AMD ships MIGraphX as an ONNX Runtime plugin execution provider:
+`libmigraphx-ep.so` in the `onnxruntime-ep-migraphx` wheel. ROCm 7.x and
+earlier instead ship the `onnxruntime-migraphx` wheel, a full build of ONNX
+Runtime with the MIGraphX EP compiled in. `CHD_NN_ORT_MIGRAPHX` covers both,
+on Linux, and picks:
+
+1. The plugin library named with
+   [`chd_nn_backend_set_library_path`](api-reference.md#chd_nn_backend_set_library_path).
+2. Otherwise the built-in EP, when the linked ONNX Runtime has one.
+3. Otherwise a plugin library beside the loaded ONNX Runtime:
+   `libmigraphx-ep.so` in the same directory, in
+   `../../onnxruntime_ep_migraphx/` from it (where pip puts the plugin wheel
+   next to a pip-installed `onnxruntime`), or in `../onnxruntime_ep_migraphx/`
+   (next to a wheel that bundles its own ONNX Runtime in a `.libs/`
+   directory).
+
+A plugin anywhere else has to be named with
+`chd_nn_backend_set_library_path`. A Python host can pass
+`onnxruntime_ep_migraphx.get_library_path()`.
+
+Nothing is loaded while looking, so
+[`chd_nn_backend_is_available`](api-reference.md#chd_nn_backend_is_available)
+reports MIGraphX as soon as a plugin file is found, before anything has
+checked that it loads or that a GPU is present.
+
+The plugin is registered with ONNX Runtime on the first model load that needs
+it and stays registered for the life of the process. If registration fails, or
+the plugin lists no GPU, a pinned load returns `CHD_E_NN_BACKEND_UNAVAILABLE`
+and the last error names the library and ONNX Runtime's reason. The outcome is
+remembered, so an auto chain does not retry a failed registration on every
+load.
+
+The plugin gets `device_id` and, when caching is on, `engine_cache_dir` as its
+`cache_dir`. Its own `ORT_MIGRAPHX_CACHE_DIR` environment variable overrides
+that directory, and its other `ORT_MIGRAPHX_*` variables apply as they would in
+any ONNX Runtime host.
+
 ### Native CoreML (macOS)
 
 To run a model on GPU/ANE through CoreML directly — rather than through ONNX

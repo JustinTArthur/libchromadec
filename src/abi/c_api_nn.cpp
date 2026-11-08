@@ -7,11 +7,40 @@
 
 #include "../common/error_state.h"
 
+namespace {
+
+// True if `b` is one of the chd_nn_backend_t enumerators.
+bool is_backend_value(chd_nn_backend_t b) {
+    switch (b) {
+        case CHD_NN_BACKEND_AUTO:
+        case CHD_NN_ORT_AUTO:
+        case CHD_NN_ORT_CPU:
+        case CHD_NN_ORT_CUDA:
+        case CHD_NN_ORT_TENSORRT:
+        case CHD_NN_ORT_COREML:
+        case CHD_NN_ORT_DIRECTML:
+        case CHD_NN_ORT_MIGRAPHX:
+        case CHD_NN_COREML:
+            return true;
+    }
+    return false;
+}
+
+chd_status_t reject_non_backend(chd_nn_backend_t b) {
+    chd::detail::set_last_error("chd_nn_backend_set_library_path: " +
+                                std::to_string(static_cast<int>(b)) +
+                                " is not a chd_nn_backend_t value");
+    return CHD_E_INVALID_ARG;
+}
+
+}  // namespace
+
 #if defined(CHD_WITH_NN)
 #include "handles.h"
 #if defined(CHD_WITH_ORT)
 #include "../nn/ort_engine.h"
 #include "../nn/ort_session.h"
+#include "../nn/plugin_ep.h"
 #include "../nn/provider_select.h"
 #endif
 #if defined(CHD_WITH_COREML)
@@ -252,11 +281,29 @@ int chd_nn_backend_is_available(chd_nn_backend_t b) {
 #endif
 }
 
+chd_status_t chd_nn_backend_set_library_path(chd_nn_backend_t backend,
+                                             const char *path_or_null) {
+    if (!is_backend_value(backend)) return reject_non_backend(backend);
+#if defined(CHD_WITH_ORT)
+    std::string err;
+    const chd_status_t st = chd::nn::plugin::setLibraryPath(backend, path_or_null, &err);
+    if (st != CHD_OK) chd::detail::set_last_error("chd_nn_backend_set_library_path: " + err);
+    return st;
+#else
+    (void)path_or_null;
+    chd::detail::set_last_error(
+        "chd_nn_backend_set_library_path: plugin libraries need the ONNX Runtime "
+        "backend, which this build does not have");
+    return CHD_E_UNSUPPORTED;
+#endif
+}
+
 #else  /* !CHD_WITH_NN */
 
 static chd_status_t nn_disabled(const char *what) {
     chd::detail::set_last_error(std::string("chromadec: ") + what +
-                                " requires a build with with_nn=true");
+                                " requires a build with with_onnxruntime=true or "
+                                "with_coreml=enabled");
     return CHD_E_INTERNAL;
 }
 
@@ -280,6 +327,14 @@ chd_status_t chd_nn_model_get_active_backend(const chd_nn_model_t *,
 
 int chd_nn_backend_is_available(chd_nn_backend_t) {
     return 0;
+}
+
+chd_status_t chd_nn_backend_set_library_path(chd_nn_backend_t backend, const char *) {
+    if (!is_backend_value(backend)) return reject_non_backend(backend);
+    chd::detail::set_last_error(
+        "chromadec: chd_nn_backend_set_library_path requires a build with "
+        "with_onnxruntime=true");
+    return CHD_E_UNSUPPORTED;
 }
 
 #endif  /* CHD_WITH_NN */

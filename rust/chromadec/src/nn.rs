@@ -67,6 +67,19 @@ pub fn backend_is_available(backend: NnBackend) -> bool {
     unsafe { sys::chd_nn_backend_is_available(backend.raw()) != 0 }
 }
 
+/// Where to find the library that provides `backend` as an ONNX Runtime
+/// plugin execution provider (`chd_nn_backend_set_library_path`); `None`
+/// restores automatic discovery. Process wide, for models loaded afterwards.
+pub fn backend_set_library_path(backend: NnBackend, path: Option<&Path>) -> Result<()> {
+    let path = path.map(path_to_cstring).transpose()?;
+    unsafe {
+        check(sys::chd_nn_backend_set_library_path(
+            backend.raw(),
+            path.as_ref().map_or(ptr::null(), |p| p.as_ptr()),
+        ))
+    }
+}
+
 /// Compute units for the native CoreML backend (`chd_nn_coreml_compute_t`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum CoremlCompute {

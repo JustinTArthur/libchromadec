@@ -115,7 +115,17 @@ void chd_nn_model_free(chd_nn_model_t *m);
 chd_status_t chd_nn_model_get_active_backend(const chd_nn_model_t *m,
                                              chd_nn_backend_t *out);
 
+/* 1 if `b` can be used in this build and host. For an ONNX Runtime backend:
+ * built into ONNX Runtime, or a plugin library providing it can be found;
+ * this does not prove a device is present. */
 int chd_nn_backend_is_available(chd_nn_backend_t b);
+
+/* Where to find the library that provides `backend` as an ONNX Runtime plugin
+ * execution provider; NULL or "" restores automatic discovery. Process wide,
+ * for models loaded afterwards. Only CHD_NN_ORT_MIGRAPHX has a plugin form,
+ * on Linux; anything else returns CHD_E_UNSUPPORTED. */
+chd_status_t chd_nn_backend_set_library_path(chd_nn_backend_t backend,
+                                             const char *path_or_null);
 
 #ifdef __cplusplus
 }

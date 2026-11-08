@@ -100,6 +100,37 @@ int testProviderAvailability() {
     return 0;
 }
 
+// A GPU job can point the MIGraphX backend at a plugin wheel's library through
+// CHD_TEST_NN_PLUGIN_LIBRARY; the availability and real-model tests then cover
+// the plugin rather than whatever discovery finds.
+int applyPluginLibraryFromEnv() {
+    const char *lib = std::getenv("CHD_TEST_NN_PLUGIN_LIBRARY");
+    if (lib == nullptr || *lib == '\0') return 0;
+    REQUIRE(chd_nn_backend_set_library_path(CHD_NN_ORT_MIGRAPHX, lib) == CHD_OK);
+    return 0;
+}
+
+int testSetLibraryPath() {
+    REQUIRE(chd_nn_backend_set_library_path(static_cast<chd_nn_backend_t>(99), nullptr)
+            == CHD_E_INVALID_ARG);
+    REQUIRE(chd_nn_backend_set_library_path(CHD_NN_ORT_CPU, nullptr) == CHD_E_UNSUPPORTED);
+    REQUIRE(chd_nn_backend_set_library_path(CHD_NN_COREML, nullptr) == CHD_E_UNSUPPORTED);
+#if defined(__linux__)
+    if (chd_has_feature("onnxruntime") == 1) {
+        REQUIRE(chd_nn_backend_set_library_path(CHD_NN_ORT_MIGRAPHX,
+                                                "/nonexistent/libmigraphx-ep.so")
+                == CHD_E_FILE_NOT_FOUND);
+        REQUIRE(std::strstr(chd_last_error(), "/nonexistent/libmigraphx-ep.so") != nullptr);
+        REQUIRE(chd_nn_backend_set_library_path(CHD_NN_ORT_MIGRAPHX, nullptr) == CHD_OK);
+        REQUIRE(chd_nn_backend_set_library_path(CHD_NN_ORT_MIGRAPHX, "") == CHD_OK);
+        return applyPluginLibraryFromEnv();
+    }
+#else
+    REQUIRE(chd_nn_backend_set_library_path(CHD_NN_ORT_MIGRAPHX, nullptr) == CHD_E_UNSUPPORTED);
+#endif
+    return 0;
+}
+
 int testSessionOptsDefault() {
     chd_nn_session_opts_t opts{};
     chd_nn_session_opts_default(&opts);
@@ -329,10 +360,11 @@ int main() {
         std::cout << "Skipping NN tests (with_nn=false).\n";
         return 0;
     }
-    int rc = 0;
+    int rc = applyPluginLibraryFromEnv();
     rc |= testLifecycle();
     rc |= testFeatureFlag();
     rc |= testProviderAvailability();
+    rc |= testSetLibraryPath();
     rc |= testSessionOptsDefault();
     rc |= testLoadNonexistentModel();
     rc |= testLoadFromMemoryInvalid();

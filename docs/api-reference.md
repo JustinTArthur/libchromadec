@@ -1785,7 +1785,43 @@ int chd_nn_backend_is_available(chd_nn_backend_t b);   /* 1 = yes, 0 = no */
 
 Query whether a backend can be used on this build and host without attempting a
 model load. The AUTO sentinels report available (they always resolve to at least
-CPU); `CHD_NN_COREML` tracks the `coreml` build feature.
+CPU); `CHD_NN_COREML` tracks the `coreml` build feature. An ONNX Runtime backend
+reports available when ONNX Runtime builds the provider in, or when a
+[plugin library](nn-models.md#plugin-execution-providers) providing it can be
+found or is already registered. That does not prove a device is present: a
+load can still fail with `CHD_E_NN_BACKEND_UNAVAILABLE`. The query never loads
+a library.
+
+### chd_nn_backend_set_library_path
+
+```c
+chd_status_t chd_nn_backend_set_library_path(chd_nn_backend_t backend,
+                                             const char *path_or_null);
+```
+
+Name the shared library that provides `backend` as an ONNX Runtime plugin
+execution provider, for an ONNX Runtime that does not build that provider in.
+The setting is process wide and applies to models loaded afterwards. A path
+set here is used ahead of a built-in provider of the same kind. `NULL` or `""`
+returns to automatic discovery, which looks beside the loaded ONNX Runtime and
+in the pip layout next to it (see
+[plugin execution providers](nn-models.md#plugin-execution-providers)).
+
+Only `CHD_NN_ORT_MIGRAPHX` has a plugin form, and only on Linux builds against
+ONNX Runtime 1.22 or newer. A Python host can pass
+`onnxruntime_ep_migraphx.get_library_path()`.
+
+| Status                 | When                                                                   |
+|------------------------|------------------------------------------------------------------------|
+| `CHD_OK`               | The path was stored, or cleared.                                       |
+| `CHD_E_INVALID_ARG`    | `backend` is not a `chd_nn_backend_t` value.                           |
+| `CHD_E_FILE_NOT_FOUND` | No file exists at the path.                                            |
+| `CHD_E_UNSUPPORTED`    | No plugin form in this build, or another library is registered for it. |
+
+A relative path is made absolute against the current directory when set. The
+file is not loaded until a model load needs it. Once ONNX Runtime has
+registered a library it stays registered for the life of the process, so a
+later call naming a different file returns `CHD_E_UNSUPPORTED`.
 
 ---
 

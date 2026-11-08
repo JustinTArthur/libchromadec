@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <system_error>
 
+#include "plugin_ep.h"
 #include "../common/log.h"
 #include <mutex>
 #include <regex>
@@ -178,10 +179,10 @@ std::vector<ProviderPreference> buildAutoChain(ProviderPreference requested)
     return { requested };
 }
 
-bool providerIsAvailable(ProviderPreference provider)
+namespace {
+
+bool builtIntoOrt(ProviderPreference provider)
 {
-    if (provider == CHD_NN_BACKEND_AUTO || provider == CHD_NN_ORT_AUTO) return true;
-    if (provider == CHD_NN_ORT_CPU)  return true;  // always
     const std::string key = availabilityKey(provider);
     if (key.empty()) return false;
     try {
@@ -193,6 +194,22 @@ bool providerIsAvailable(ProviderPreference provider)
         return false;
     }
     return false;
+}
+
+bool pluginReachable(ProviderPreference provider, std::string *outWhyNot)
+{
+    if (!plugin::hasPluginForm(provider)) return false;
+    return plugin::isRegistered(provider) ||
+           !plugin::resolveLibrary(provider, outWhyNot).empty();
+}
+
+}  // namespace
+
+bool providerIsAvailable(ProviderPreference provider)
+{
+    if (provider == CHD_NN_BACKEND_AUTO || provider == CHD_NN_ORT_AUTO) return true;
+    if (provider == CHD_NN_ORT_CPU)  return true;  // always
+    return builtIntoOrt(provider) || pluginReachable(provider, nullptr);
 }
 
 bool attachCpu(Ort::SessionOptions &, std::string *)
@@ -471,14 +488,21 @@ bool attachTensorRT(Ort::SessionOptions &options,
 }
 
 // ─── MIGraphX attach (Linux / AMD) ───────────────────────────────────────
-// Uses the generic AppendExecutionProvider key-value entry point (same
-// shape as our CoreML attach) rather than the OrtMIGraphXProviderOptions
-// struct. That struct's layout has shifted across ORT versions and AMD's
-// pre-built wheels were built against a different layout than upstream's
-// headers, so passing the struct produced "Failed to map enum value to
-// name" failures from arena_extend_strategy reading off the end. The
-// string-keyed map is ABI-stable across builds — unknown keys are
-// silently ignored, recognised ones are parsed by the EP's own option
+// Two forms. The plugin EP (ROCm 10 on) is used when the caller named its
+// library, or when ONNX Runtime has no built-in MIGraphX and the plugin is
+// found or already registered; a built-in EP otherwise wins, so an install
+// that ships one never loads a second ROCm stack beside it. The plugin gets
+// only device_id and cache_dir: it rejects option keys it does not know, and
+// it reads every ep.* session entry, not just its own.
+//
+// The built-in form uses the generic AppendExecutionProvider key-value entry
+// point (same shape as our CoreML attach) rather than the
+// OrtMIGraphXProviderOptions struct. That struct's layout has shifted across
+// ORT versions and AMD's pre-built wheels were built against a different
+// layout than upstream's headers, so passing the struct produced "Failed to
+// map enum value to name" failures from arena_extend_strategy reading off
+// the end. The string-keyed map is ABI-stable across builds — unknown keys
+// are silently ignored, recognised ones are parsed by the EP's own option
 // reader.
 bool attachMIGraphX(Ort::SessionOptions &options,
                     const AttachConfig &config,
@@ -486,6 +510,31 @@ bool attachMIGraphX(Ort::SessionOptions &options,
 {
 #if defined(__linux__)
     const EngineCacheConfig &cache = config.cache;
+    std::string pluginWhyNot;
+    const bool usePlugin =
+        plugin::explicitPathSet(CHD_NN_ORT_MIGRAPHX) ||
+        (!builtIntoOrt(CHD_NN_ORT_MIGRAPHX) && pluginReachable(CHD_NN_ORT_MIGRAPHX, &pluginWhyNot));
+    if (usePlugin) {
+        std::vector<std::pair<std::string, std::string>> epOptions = {
+            { "device_id", std::to_string(config.deviceId) },
+        };
+        if (!cache.dir.empty()) epOptions.emplace_back("cache_dir", cache.dir);
+        std::string library;
+        if (!plugin::attach(options, CHD_NN_ORT_MIGRAPHX, config.deviceId, epOptions,
+                            &library, outError)) {
+            return false;
+        }
+        chd::log::info() << "chd_nn: attached MIGraphX through the plugin EP from" << library;
+        return true;
+    }
+    if (!builtIntoOrt(CHD_NN_ORT_MIGRAPHX)) {
+        if (outError) {
+            *outError = "not built into this ONNX Runtime, and " +
+                        (pluginWhyNot.empty() ? std::string("no plugin library was found")
+                                              : pluginWhyNot);
+        }
+        return false;
+    }
     try {
         std::unordered_map<std::string, std::string> mxOpts;
         mxOpts["device_id"] = std::to_string(config.deviceId);
@@ -503,6 +552,7 @@ bool attachMIGraphX(Ort::SessionOptions &options,
             mxOpts["migraphx_model_cache_dir"] = cache.dir;
         }
         options.AppendExecutionProvider("MIGraphX", mxOpts);
+        chd::log::info() << "chd_nn: attached MIGraphX through the built-in EP";
         return true;
     } catch (const std::exception &e) {
         if (outError) *outError = e.what();
@@ -599,7 +649,13 @@ bool attachProviderChain(Ort::SessionOptions &options,
     std::ostringstream errs;
     for (const auto provider : chain) {
         if (!providerIsAvailable(provider)) {
-            errs << providerName(provider) << ": not available in this ORT build\n";
+            errs << providerName(provider) << ": not available in this ORT build";
+            std::string whyNot;
+            if (plugin::hasPluginForm(provider) &&
+                plugin::resolveLibrary(provider, &whyNot).empty() && !whyNot.empty()) {
+                errs << ", and " << whyNot;
+            }
+            errs << "\n";
             continue;
         }
 

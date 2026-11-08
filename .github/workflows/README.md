@@ -120,6 +120,11 @@ Python 3.11+, and the `22.04` image ships 3.10, which caps pip at ORT 1.24.2.
 The MIGraphX EP's only ROCm coupling is `libmigraphx_c.so.3` and
 `libamdhip64.so.7`, both satisfied by ROCm 7.2.3.
 
+ROCm 10 drops that built-in EP for a plugin EP wheel,
+`onnxruntime-ep-migraphx`, whose `libmigraphx-ep.so` lives outside any composed
+root. `test_nn_framework` takes `CHD_TEST_NN_PLUGIN_LIBRARY` to name that file
+and passes it to `chd_nn_backend_set_library_path` before anything loads.
+
 macOS releases include the CoreML execution provider. CI takes Microsoft's
 builds rather than a system package so every platform pins the same version
 from the same publisher, not because a system copy is unusable.

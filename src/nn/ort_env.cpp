@@ -84,6 +84,7 @@ void pinSelfModule()
 // one, and running it before exit is proven safe.
 Ort::Env  *OrtEnvSingleton::env_ = nullptr;
 std::mutex OrtEnvSingleton::envMutex_;
+uint64_t   OrtEnvSingleton::generation_ = 0;
 
 Ort::Env &OrtEnvSingleton::get()
 {
@@ -91,6 +92,7 @@ Ort::Env &OrtEnvSingleton::get()
     if (env_ == nullptr) {
         pinSelfModule();
         env_ = makeEnv().release();
+        ++generation_;
     }
     return *env_;
 }
@@ -100,6 +102,12 @@ void OrtEnvSingleton::shutdown()
     std::lock_guard<std::mutex> lock(envMutex_);
     delete env_;
     env_ = nullptr;
+}
+
+uint64_t OrtEnvSingleton::generation()
+{
+    std::lock_guard<std::mutex> lock(envMutex_);
+    return env_ != nullptr ? generation_ : 0;
 }
 
 }  // namespace chd::nn

@@ -71,6 +71,7 @@ if has_ort
     'nn/ort_env.cpp',
     'nn/ort_session.cpp',
     'nn/ort_engine.cpp',
+    'nn/plugin_ep.cpp',
     'nn/provider_select.cpp',
   )
   chromadec_deps += [ort_dep]

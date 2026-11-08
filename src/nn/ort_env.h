@@ -9,11 +9,17 @@
 // which is opt-in to avoid Windows DLL-unload ordering
 // hazards).
 //
+// Plugin execution-provider registrations live and die with the env: ONNX
+// Runtime unregisters them when it is destroyed. ONNX Runtime also keeps one
+// refcounted env per process, so ours may be shared with any other user of the
+// same libonnxruntime, and a registration may outlive our own shutdown().
+//
 // This header is internal — the C ABI never exposes Ort types.
 
 #ifndef CHD_NN_ORT_ENV_H
 #define CHD_NN_ORT_ENV_H
 
+#include <cstdint>
 #include <mutex>
 
 #include <onnxruntime_cxx_api.h>
@@ -37,11 +43,17 @@ public:
     // destructors on unload and Windows ordering is fragile.
     static void shutdown();
 
+    // Identifies the current env: a new value each time get() constructs
+    // one, 0 while none exists. Lets callers tie per-env state, such as a
+    // plugin registration, to the env it was made in. Does not construct.
+    static uint64_t generation();
+
     OrtEnvSingleton() = delete;
 
 private:
     static Ort::Env  *env_;   // leaked unless chd_shutdown() runs; see .cpp
     static std::mutex envMutex_;
+    static uint64_t   generation_;
 };
 
 }  // namespace chd::nn

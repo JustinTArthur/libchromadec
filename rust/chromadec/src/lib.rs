@@ -26,6 +26,7 @@ pub use error::{Error, Result, Status};
 pub use frame::{Frame, PlaneView};
 pub use nn::{
     CoremlCompute, EngineCacheDir, NnBackend, NnModel, SessionOpts, backend_is_available,
+    backend_set_library_path,
 };
 #[cfg(feature = "tokio")]
 pub use stream::{

@@ -248,7 +248,9 @@ chromadec = { version = "0.2", features = ["log"] }
 `chd_nn_session_opts_default()`. Bind a model with `Decoder::set_nn_model`
 before `commit`. The decoder borrows the model and does not take ownership, so
 keep the `NnModel` alive for the bound decoder's lifetime. Backend availability
-in the current build/host is queryable with `chromadec::backend_is_available`.
+in the current build/host is queryable with `chromadec::backend_is_available`,
+and `chromadec::backend_set_library_path` names a
+[plugin library](nn-models.md#plugin-execution-providers) for a backend.
 
 [`Status`]: https://docs.rs/chromadec/latest/chromadec/enum.Status.html
 [`Cancel`]: https://docs.rs/chromadec/latest/chromadec/struct.Cancel.html

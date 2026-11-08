@@ -22,6 +22,15 @@
 // LoadLibrary probes (per vapoursynth-analog patch #5; LoadLibrary on
 // Windows triggers the provider's DllMain before ORT's host pointer is set,
 // crashing the provider's overridden operator new).
+//
+// That list only covers providers built into the linked ONNX Runtime. A plugin
+// execution provider ships as its own library and is registered with the env
+// at run time (plugin_ep.h), so it never appears there. MIGraphX has both
+// forms: built in up to ROCm 7, plugin only from ROCm 10. For it, availability
+// also counts a plugin library that can be found or is already registered,
+// and the attach picks the plugin when the caller named its library, the
+// built-in EP when ONNX Runtime has one, and otherwise a plugin found beside
+// ONNX Runtime.
 
 #ifndef CHD_NN_PROVIDER_SELECT_H
 #define CHD_NN_PROVIDER_SELECT_H
@@ -63,9 +72,9 @@ struct AttachConfig {
 // (when non-AUTO) prepended at the front of the chain.
 std::vector<ProviderPreference> buildAutoChain(ProviderPreference requested);
 
-// True if `provider` is in the ORT runtime's list of available providers.
-// CPU is always available; other providers depend on which provider DLLs
-// are loaded at startup. Uses Ort::GetAvailableProviders().
+// True if `provider` is in the ORT runtime's list of available providers or,
+// for a backend with a plugin form, its plugin library can be found or is
+// registered. CPU is always available. Never loads a library.
 bool providerIsAvailable(ProviderPreference provider);
 
 // Attach a provider chain to `options`. Stops at the first successfully
@@ -108,7 +117,8 @@ bool attachMIGraphX(Ort::SessionOptions &options,
 // into the process for the rest of its lifetime. Call after a session has
 // been created with that EP attached; the libraries are guaranteed loaded by
 // then. No-op off Linux, for providers without a dlopen'd library, and for
-// libraries this process never loaded. Idempotent per library.
+// libraries this process never loaded. Idempotent per library. A plugin
+// library is pinned by the plugin registry when it registers it instead.
 void pinProviderLibraries(chd_nn_backend_t provider);
 
 }  // namespace chd::nn

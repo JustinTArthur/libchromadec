@@ -246,6 +246,25 @@ test_nn_framework = executable('test_nn_framework',
   dependencies: chromadec_abi_dep)
 test('nn_framework', test_nn_framework, depends: ort_test_runtime)
 
+# Plugin execution-provider registration against a stub plugin library. The
+# stub only needs ONNX Runtime's C header, not its library. Each stub mode runs
+# in its own process because a successful registration lasts for the process.
+if has_ort and host_machine.system() == 'linux'
+  nn_plugin_stub = shared_module('nn_plugin_stub',
+    'unit/nn_plugin_stub.c',
+    dependencies: ort_dep.partial_dependency(compile_args: true, includes: true))
+  test_nn_plugin_ep = executable('test_nn_plugin_ep',
+    'unit/test_nn_plugin_ep.cpp',
+    cpp_args: [nn_fixture_arg],
+    dependencies: chromadec_abi_dep)
+  foreach mode : ['fail', 'empty']
+    test('nn_plugin_ep_' + mode, test_nn_plugin_ep,
+      env: {'CHD_TEST_PLUGIN_STUB': nn_plugin_stub.full_path(),
+            'CHD_TEST_PLUGIN_STUB_MODE': mode},
+      depends: nn_plugin_stub)
+  endforeach
+endif
+
 # nnTransform3D wiring smoke test. Constructs a session from the located model
 # (the synthetic fixture by default, or real weights via $CHD_TEST_NN_MODEL) and
 # binds it — both from a file path and from an in-memory buffer. Gated on the
