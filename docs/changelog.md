@@ -1,5 +1,86 @@
 # Changelog
 
+## [0.2.1] - 2026-11-09
+
+**Build directories configured before this release need `meson setup --wipe`.**
+`with_onnxruntime` changed type, and Meson can't reconfigure or regenerate a
+directory that has the old value stored.
+
+### Added
+
+- `chd_nn_backend_set_library_path` (Rust: `backend_set_library_path`), and
+  support for MIGraphX as an ONNX Runtime plugin execution provider, which is
+  how ROCm 10 ships it. `CHD_NN_ORT_MIGRAPHX` uses a library named through that
+  function first, then a MIGraphX built into ONNX Runtime, then a plugin found
+  beside ONNX Runtime or in pip's layout. Plugins need Linux and ONNX Runtime
+  1.22 or newer. `chd_nn_backend_is_available` now counts a plugin it can find.
+- `rocm_offload_targets` build option, naming the GPUs nnTransform3D's HIP
+  kernels are built for. The default, `auto`, builds `amdgcnspirv` plus native
+  code for each GPU visible while configuring. Binaries meant for other machines
+  should list their targets.
+
+### Changed
+
+- `with_onnxruntime` is now a feature option: `enabled` (still the default),
+  `disabled`, or `auto`, which builds without ONNX Runtime when it's missing.
+  `true` and `false` still work but are deprecated.
+- `chd_video_get_info` now always describes the video as opened, so its
+  `num_frames` and `is_first_field_first` don't follow a decoder's
+  `reverse_field_order`. That decoder's frame count can be one smaller; read it
+  from `chd_decoder_get_output_info`.
+- `chd_decoder_commit` can now fail with:
+    - `CHD_E_FORMAT_UNSUPPORTED` for a Y/C pair whose planes pair into different
+      frame counts under the decoder's field order.
+    - `CHD_E_INVALID_ARG` for a `CHD_OPT_NN_INPUT_MAGNITUDE_SCALE` that isn't
+      finite and above zero.
+    - `CHD_E_NN_BACKEND_UNAVAILABLE` for nnTransform3D on a MIGraphX GPU the
+      build has no kernels for.
+- `chd_video_add_extra_source_composite` and `chd_video_add_extra_source_yc`
+  fail with `CHD_E_INVALID_ARG` once a decode has run with correction on.
+- `chd_decoder_set_dropout` applies from the next decode, with no commit needed.
+- With the MIGraphX built into ONNX Runtime, a `NULL` `engine_cache_dir` now
+  means no cache, so every load recompiles. A named directory has to be unique
+  to one input shape. The plugin form isn't affected.
+- Rust: `chromadec-sys` now requires a libchromadec at least as new as the
+  crate itself.
+
+### Fixed
+
+- nnTransform3D lost one of the two tile passes each frame needs, leaving its
+  first field with only a low-weight temporal slot. Output changes for every
+  frame, and with the v2 weights chroma now matches asdfqazsnbb's v2 harness to
+  its output rounding. Decoding in order stays at about 0.2.0's speed, since
+  neighbouring frames share passes, but the first frame after a seek now costs
+  two passes.
+- nnTransform3D ran black placeholder frames through its tile passes, and moved
+  its tile grid with the crop. Tiles are now anchored to the picture, so a crop
+  only trims the output.
+- Dropout correction reached only the frame being decoded. It now covers the
+  look-behind and look-ahead frames too, which changes 3D decoder output when
+  correction is on. Dropout stats still count only the decoded frame.
+- Dropout positions and extra sources on subcarrier-locked PAL now shift with
+  the second field, and dropout span queries move by 2 samples to match.
+- `device_id` reached only the session options: GPU providers always got device
+  0, and the CUDA and HIP pipelines assumed it. All of them now use the
+  requested device.
+- A pinned ONNX Runtime provider that fails to attach now returns the documented
+  `CHD_E_NN_BACKEND_UNAVAILABLE`, not `CHD_E_NN_MODEL_LOAD`.
+- `reverse_field_order` was written onto the shared video, so it leaked between
+  decoders, undid a CVBS `is_second_field_first` open, skipped the Y/C chroma
+  plane and extra sources, and raced with decodes. Each decoder now keeps its
+  own.
+- The MIGraphX built into ONNX Runtime reused a program cached for one input
+  shape on other shapes, returning output of the wrong dimensions or failing
+  with an illegal memory access. ldzeug2 decoders now also reject a model output
+  whose shape isn't what was requested.
+- nnTransform3D segfaulted the host process on an AMD GPU the build had no HIP
+  kernels for.
+- Concurrent decoders and `chd_decode_frames_async` workers crashed in FFTW's
+  planner.
+- An out-of-bounds read in the multi-source alignment when an extra source was
+  added after decoding had started.
+- cuFFT and hipFFT device buffers leaked when an FFT failed.
+
 ## [0.2.0] - 2026-09-13
 
 ### Added
