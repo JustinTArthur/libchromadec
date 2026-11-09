@@ -262,7 +262,8 @@ test_decode_frame_abi = executable('test_decode_frame_abi',
   'unit/test_decode_frame_abi.cpp',
   cpp_args: [nn_fixture_arg],
   dependencies: [chromadec_abi_dep, sqlite3_dep, threads_dep])
-test('decode_frame_abi', test_decode_frame_abi, depends: ort_test_runtime)
+test('decode_frame_abi', test_decode_frame_abi, depends: ort_test_runtime,
+     timeout: 180)  # sanitizer builds outrun the 30s meson default
 
 # Plugin execution-provider registration against a stub plugin library. The
 # stub only needs ONNX Runtime's C header, not its library. Each stub mode runs
@@ -293,7 +294,8 @@ if has_ort
     'unit/test_nntransform3d.cpp',
     cpp_args: [nn_fixture_arg],
     dependencies: [chromadec_internal_dep, ort_dep])
-  test('nntransform3d', test_nntransform3d, depends: ort_test_runtime)
+  test('nntransform3d', test_nntransform3d, depends: ort_test_runtime,
+       timeout: 180)  # sanitizer builds outrun the 30s meson default
 
   # ldzeug2 NN decoders. Same shape as the nnTransform3D test: binds sessions
   # from the located model (synthetic fixture by default, or real weights via
