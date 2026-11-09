@@ -8,7 +8,7 @@
 // have something to feed.
 //
 // The test compiles into a no-op pass when the library was built with
-// with_nn=false (chd_has_feature("nn") returns 0 → we skip the body).
+// no NN backend (chd_has_feature("nn") returns 0 → we skip the body).
 
 #include <chromadec/errors.h>
 #include <chromadec/nn.h>
@@ -373,7 +373,7 @@ int main() {
     // Bail with a pass if the build doesn't include NN; the test still
     // confirms the feature flag works.
     if (chd_has_feature("nn") != 1) {
-        std::cout << "Skipping NN tests (with_nn=false).\n";
+        std::cout << "Skipping NN tests (no NN backend in this build).\n";
         return 0;
     }
     int rc = applyPluginLibraryFromEnv();

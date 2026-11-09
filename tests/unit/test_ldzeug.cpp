@@ -336,7 +336,7 @@ int testBuiltinMIGraphXCacheDir() {
 
 int main() {
     if (chd_has_feature("nn") != 1) {
-        std::cout << "Skipping ldzeug tests (with_nn=false).\n";
+        std::cout << "Skipping ldzeug tests (no NN backend in this build).\n";
         return 0;
     }
 #ifdef CHD_TEST_NO_ONNXRUNTIME

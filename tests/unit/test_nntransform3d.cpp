@@ -618,7 +618,7 @@ int testEngineGenerationSeparatesResults() {
 
 int main() {
     if (chd_has_feature("nn") != 1) {
-        std::cout << "Skipping nnTransform3D tests (with_nn=false).\n";
+        std::cout << "Skipping nnTransform3D tests (no NN backend in this build).\n";
         return 0;
     }
 #ifdef CHD_TEST_NO_ONNXRUNTIME

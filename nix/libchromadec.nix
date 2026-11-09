@@ -129,7 +129,7 @@ stdenv.mkDerivation (finalAttrs: {
   mesonBuildType = "release";
 
   mesonFlags = [
-    (lib.mesonBool "with_onnxruntime" withOnnxruntime)
+    (lib.mesonOption "with_onnxruntime" (mesonFeature withOnnxruntime))
     (lib.mesonOption "with_coreml" (mesonFeature withCoreml))
     (lib.mesonOption "with_cuda" (mesonFeature cudaSupport))
     # HIP needs hipcc driving a separate compile step, which does not survive

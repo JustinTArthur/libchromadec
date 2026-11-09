@@ -98,11 +98,12 @@ fftw3_dep   = dependency('fftw3',   required: false)
 # restore). That third form is why each candidate below names its DLL
 # directory separately from its import-library directory instead of assuming
 # the two are the same place.
+ort_opt     = get_option('with_onnxruntime')
 ort_root    = get_option('onnxruntime_root')
 ort_dep     = dependency('', required: false)
 ort_dll_dir = ''
 ort_incdirs = []
-if get_option('with_onnxruntime') and ort_root != ''
+if ort_opt.allowed() and ort_root != ''
   fs = import('fs')
   nuget_rid = host_machine.cpu_family() == 'aarch64' ? 'win-arm64' : 'win-x64'
   # The Windows ML package names its per-arch import-library folder without
@@ -149,7 +150,7 @@ if get_option('with_onnxruntime') and ort_root != ''
           'build/native/include), or the Windows ML NuGet package layout ' +
           '(lib/native/' + winml_arch + ' + include/winml + runtimes/' + nuget_rid +
           '/native). Pass a different root, drop the option to discover ORT ' +
-          'via pkg-config or CMake, or set -Dwith_onnxruntime=false.')
+          'via pkg-config or CMake, or set -Dwith_onnxruntime=disabled.')
   endif
   ort_dep = declare_dependency(
     dependencies: ort_lib,
@@ -161,17 +162,14 @@ if get_option('with_onnxruntime') and ort_root != ''
   # DLLs in different directories.
   ort_dll_dir = ort_dlldirs.length() > 0 ? ort_dlldirs[0] : ''
 endif
-if not ort_dep.found()
-  ort_dep = dependency('libonnxruntime', required: false)
-endif
-if not ort_dep.found()
-  ort_dep = dependency('onnxruntime', required: false)
+if ort_opt.allowed() and not ort_dep.found()
+  ort_dep = dependency('libonnxruntime', 'onnxruntime', required: false)
 endif
 
 # ONNX Runtime backend. The NN framework (interface, decoders, C ABI) is
 # backend-agnostic; `has_nn` (the umbrella "any NN backend present") is computed
 # after CoreML discovery below as `has_ort or has_coreml`.
-has_ort    = get_option('with_onnxruntime') and ort_dep.found()
+has_ort    = ort_dep.found()
 has_fftw   = fftw3_dep.found()
 has_sqlite = sqlite3_dep.found()
 
@@ -324,7 +322,7 @@ endif
 # against the CoreML / Metal system frameworks.
 #
 # This is a fully independent inference backend — it does NOT require ONNX
-# Runtime. `with_onnxruntime=false -Dwith_coreml=enabled` yields a CoreML-only
+# Runtime. `with_onnxruntime=disabled -Dwith_coreml=enabled` yields a CoreML-only
 # library on macOS. (It also sits alongside the ORT CoreML EP when ORT is
 # present, adding the native .mlpackage path the EP can't accelerate.)
 coreml_opt = get_option('with_coreml').disable_if(
@@ -349,17 +347,21 @@ endif
 # built when EITHER inference backend is present.
 has_nn = has_ort or has_coreml
 
-# If the user explicitly requested the ONNX Runtime backend but ORT is missing,
-# fail loudly rather than silently dropping it. The default for with_onnxruntime
-# is `true`, so silent absence would mean every Linux/macOS dev build without ORT
-# installed would quietly omit it — and that bites later when an integration test
-# loads a model expecting ORT to be present. (On macOS you can instead build the
-# native CoreML backend alone with -Dwith_onnxruntime=false -Dwith_coreml=enabled.)
-if get_option('with_onnxruntime') and not ort_dep.found()
-  error('with_onnxruntime=true but ONNX Runtime was not found via pkg-config or ' +
-        '-Donnxruntime_root. Install ORT (Homebrew formula `onnxruntime`, ' +
-        'apt `libonnxruntime-dev`, or download Microsoft GitHub release) or ' +
-        'pass -Dwith_onnxruntime=false to disable the ORT backend.')
+# An enabled ONNX Runtime backend with no ORT found is a configure error rather
+# than a silent drop. The default for with_onnxruntime is `enabled`, so silent
+# absence would mean every Linux/macOS dev build without ORT installed would
+# quietly omit it, and that bites later when an integration test loads a model
+# expecting ORT to be present. `auto` opts into the silent drop. The error is
+# raised here rather than through `required:` on the lookups so it can carry the
+# install hints and mention -Donnxruntime_root. (On macOS you can instead build
+# the native CoreML backend alone with -Dwith_onnxruntime=disabled
+# -Dwith_coreml=enabled.)
+if ort_opt.enabled() and not ort_dep.found()
+  error('with_onnxruntime=enabled but ONNX Runtime was not found via pkg-config, ' +
+        'CMake or -Donnxruntime_root. Install ORT (Homebrew formula `onnxruntime`, ' +
+        'apt `libonnxruntime-dev`, or download Microsoft GitHub release), ' +
+        'pass -Dwith_onnxruntime=auto to build without it when it is missing, or ' +
+        'pass -Dwith_onnxruntime=disabled to disable the ORT backend.')
 endif
 
 # ── Public headers + library (include/ defines version_h via configure_file,

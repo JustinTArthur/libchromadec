@@ -163,7 +163,8 @@ Query optional build features. Recognised names: `"nn"`, `"onnxruntime"`,
 inference backend is built. The individual backends have their own flags:
 `"onnxruntime"` (the ONNX Runtime backend, build option `with_onnxruntime`) and
 `"coreml"` (the native CoreML backend, build option `with_coreml`). The two are
-independent: a macOS build with `-Dwith_onnxruntime=false -Dwith_coreml=enabled`
+independent: a macOS build with
+`-Dwith_onnxruntime=disabled -Dwith_coreml=enabled`
 reports `"nn"`=1, `"coreml"`=1, `"onnxruntime"`=0, and runs the ldzeug and
 nnTransform3D decoders entirely on native CoreML (`.onnx` models and the
 `CHD_NN_ORT_*` backends are then unavailable — see

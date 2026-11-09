@@ -302,7 +302,7 @@ chd_status_t chd_nn_backend_set_library_path(chd_nn_backend_t backend,
 
 static chd_status_t nn_disabled(const char *what) {
     chd::detail::set_last_error(std::string("chromadec: ") + what +
-                                " requires a build with with_onnxruntime=true or "
+                                " requires a build with with_onnxruntime=enabled or "
                                 "with_coreml=enabled");
     return CHD_E_INTERNAL;
 }
@@ -333,7 +333,7 @@ chd_status_t chd_nn_backend_set_library_path(chd_nn_backend_t backend, const cha
     if (!is_backend_value(backend)) return reject_non_backend(backend);
     chd::detail::set_last_error(
         "chromadec: chd_nn_backend_set_library_path requires a build with "
-        "with_onnxruntime=true");
+        "with_onnxruntime=enabled");
     return CHD_E_UNSUPPORTED;
 }
 

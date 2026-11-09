@@ -32,7 +32,7 @@
 #include "../reader/source.h"
 
 // chd_nn_model is only populated when the build has NN support (the C ABI
-// rejects loads cleanly when with_nn=false). The model handle holds a
+// rejects loads cleanly without it). The model handle holds a
 // backend-agnostic InferenceEngine (ORT or native CoreML), so this only
 // needs the ORT-free interface header.
 #if defined(CHD_WITH_NN)

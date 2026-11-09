@@ -1,5 +1,7 @@
+# true and false are the values from when this was a boolean option.
 option('with_onnxruntime',
-       type: 'boolean', value: true,
+       type: 'feature', value: 'enabled',
+       deprecated: {'true': 'enabled', 'false': 'disabled'},
        description: 'Enable the ONNX Runtime inference backend (NN decoders via ORT)')
 
 option('with_cuda',

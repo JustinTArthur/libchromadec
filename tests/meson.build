@@ -246,7 +246,7 @@ endif
 # NN framework smoke tests (Ort::Env lifecycle, provider availability,
 # chd_nn_model_load_from_file / _from_memory error paths, and a real-model
 # happy path against the synthetic fixture). The body self-skips when the
-# library was built with with_nn=false. ORT itself is not directly linked.
+# library was built without any NN backend. ORT itself is not directly linked.
 test_nn_framework = executable('test_nn_framework',
   'unit/test_nn_framework.cpp',
   cpp_args: [nn_fixture_arg],

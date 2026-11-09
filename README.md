@@ -55,9 +55,10 @@ neural decoders; if it is not discoverable, either point the build at it with
 `-Donnxruntime_root=/path/to/onnxruntime` (an unpacked release archive, or a
 restored NuGet package directory: `Microsoft.ML.OnnxRuntime.DirectML` or the
 Windows ML package, the two forms DirectML ships in) or turn it off with
-`-Dwith_onnxruntime=false`. FFTW3 is optional and gates Transform-PAL. CUDA,
-ROCm, and native CoreML are auto-detected and gate GPU inference. Run `meson
-configure build` to see every option.
+`-Dwith_onnxruntime=disabled` (`auto` builds it only when it is found). FFTW3
+is optional and gates Transform-PAL. CUDA, ROCm, and native CoreML are
+auto-detected and gate GPU inference. Run `meson configure build` to see every
+option.
 
 ## Using it
 

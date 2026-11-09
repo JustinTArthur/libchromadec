@@ -228,7 +228,7 @@ subproject alone by prefixing it with the subproject name, so a vendored build
 is tuned without touching your own settings:
 
 ```sh
-meson setup build -Dchromadec:with_onnxruntime=false -Dchromadec:optimization=3
+meson setup build -Dchromadec:with_onnxruntime=disabled -Dchromadec:optimization=3
 ```
 
 That is also how you pick which half of the library a vendored build links.
@@ -316,7 +316,7 @@ on, so the module needs no build tooling of its own:
   - name: chromadec
     buildsystem: meson
     config-opts:
-      - -Dwith_onnxruntime=false
+      - -Dwith_onnxruntime=disabled
       - -Dwith_coreml=disabled
       - -Dwith_cuda=disabled
       - -Dwith_rocm=disabled
@@ -342,7 +342,7 @@ Points that matter inside flatpak-builder's sandbox:
 - The recipe above turns every inference backend off, which is what fits a
   Flatpak: CoreML, CUDA and ROCm are not reachable from the sandbox, and there
   is no established ONNX Runtime module. To ship the neural decoders, build ORT
-  as an earlier module and flip `with_onnxruntime` on.
+  as an earlier module and set `with_onnxruntime` to `enabled`.
 - The library installs to `/app/lib`, which the runtime's loader already
   searches; no RPATH step is needed for the application binary.
 

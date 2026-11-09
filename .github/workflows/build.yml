@@ -316,7 +316,7 @@ jobs:
         run: |
           . .venv/bin/activate
           if [ "${{ matrix.no_ort }}" = "true" ]; then
-            meson setup build -Dwith_examples=true -Dwith_onnxruntime=false
+            meson setup build -Dwith_examples=true -Dwith_onnxruntime=disabled
           else
             meson setup build -Dwith_examples=true -Donnxruntime_root="${ORT_ROOT}"
           fi

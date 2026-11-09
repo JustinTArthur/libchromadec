@@ -224,7 +224,7 @@ fp32 program is ineligible for it wholesale, whatever its ops). The engine
 falls back to CPU-only if a GPU predict fails.
 
 Native CoreML is a self-contained backend and does **not** require ONNX Runtime.
-A macOS build with `-Dwith_onnxruntime=false -Dwith_coreml=enabled` ships the
+A macOS build with `-Dwith_onnxruntime=disabled -Dwith_coreml=enabled` ships the
 ldzeug and nnTransform3D decoders running entirely on CoreML, with no ORT
 dependency linked. When both backends are built (the macOS default) they coexist:
 load a `.onnx` for ORT or a `.mlpackage` for native CoreML, and
