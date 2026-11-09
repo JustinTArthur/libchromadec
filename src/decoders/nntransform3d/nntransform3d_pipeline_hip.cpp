@@ -356,8 +356,11 @@ void unflattenFrom(std::vector<std::vector<double>> &dst, const double *src,
 
 bool runHipPipeline(
     const chd::metadata::LdDecodeMetaData::VideoParameters &videoParameters,
+    const TileGrid &grid,
     const uint16_t *currentRaw,
     const uint16_t *nextRaw,
+    bool padF0,
+    bool padF1,
     std::vector<std::vector<double>> &currentAccChroma,
     std::vector<std::vector<double>> &currentWeightSum,
     std::vector<std::vector<double>> &nextAccChroma,
@@ -367,15 +370,15 @@ bool runHipPipeline(
     double inputMagnitudeScale,
     int deviceId)
 {
-    const int32_t firstActiveY = videoParameters.firstActiveFrameLine;
-    const int32_t lastActiveY  = videoParameters.lastActiveFrameLine;
-    const int32_t activeStartX = videoParameters.activeVideoStart;
-    const int32_t activeEndX   = videoParameters.activeVideoEnd;
+    const int32_t firstActiveY = grid.firstLine;
+    const int32_t lastActiveY  = grid.lastLine;
+    const int32_t activeStartX = grid.firstSample;
+    const int32_t activeEndX   = grid.endSample;
     const int32_t fieldWidth   = videoParameters.fieldWidth;
     const int32_t frameHeight  = (videoParameters.fieldHeight * 2) - 1;
 
-    const int32_t startY = firstActiveY - (kNy / 2);
-    const int32_t startX = activeStartX - (kNx / 2);
+    const int32_t startY = grid.startY;
+    const int32_t startX = grid.startX;
 
     std::vector<int> hLedgerY;
     std::vector<int> hLedgerX;
@@ -428,6 +431,16 @@ bool runHipPipeline(
     } \
 } while (0)
 
+#define CHD_HIPFFT_CHECK_OR_CLEANUP(expr) do { \
+    hipfftResult _err = (expr); \
+    if (_err != HIPFFT_SUCCESS) { \
+        chd::log::warn() << "nnTransform3D[HIP]: " #expr " failed with hipFFT code" \
+                         << static_cast<int>(_err); \
+        cleanupFrameBuffers(); \
+        return false; \
+    } \
+} while (0)
+
     CHD_HIP_CHECK_OR_CLEANUP(hipMalloc(&dCvbsF0, cvbsBytes));
     CHD_HIP_CHECK_OR_CLEANUP(hipMalloc(&dCvbsF1, cvbsBytes));
     CHD_HIP_CHECK_OR_CLEANUP(hipMalloc(&dAccF0,  accBytes));
@@ -455,9 +468,6 @@ bool runHipPipeline(
     const int blocksForAll    = (totalElements + kThreadsPerBlock - 1) / kThreadsPerBlock;
     const int blockSize       = static_cast<int>(kNt * kNy * kNx);
 
-    constexpr bool padF0 = false;
-    constexpr bool padF1 = false;
-
     calcDCKernel<<<blocksForLedger, kThreadsPerBlock>>>(
         dCvbsF0, dCvbsF1, padF0, padF1,
         cache.dLedgerY, cache.dLedgerX, cache.dLedgerDc,
@@ -473,7 +483,7 @@ bool runHipPipeline(
         firstActiveY, lastActiveY, fieldWidth);
     CHD_HIP_CHECK_OR_CLEANUP(hipDeviceSynchronize());
 
-    CHD_HIPFFT_CHECK(hipfftExecZ2Z(cache.pFwd, cache.dInBatch, cache.dOutBatch, HIPFFT_FORWARD));
+    CHD_HIPFFT_CHECK_OR_CLEANUP(hipfftExecZ2Z(cache.pFwd, cache.dInBatch, cache.dOutBatch, HIPFFT_FORWARD));
 
     calcMagnitudeKernel<<<blocksForAll, kThreadsPerBlock>>>(
         cache.dOutBatch, cache.dTrtInput,
@@ -509,7 +519,7 @@ bool runHipPipeline(
         cache.dOutBatch, cache.dMask, totalElements);
     CHD_HIP_CHECK_OR_CLEANUP(hipDeviceSynchronize());
 
-    CHD_HIPFFT_CHECK(hipfftExecZ2Z(cache.pInv, cache.dOutBatch, cache.dInBatch, HIPFFT_BACKWARD));
+    CHD_HIPFFT_CHECK_OR_CLEANUP(hipfftExecZ2Z(cache.pInv, cache.dOutBatch, cache.dInBatch, HIPFFT_BACKWARD));
 
     olaKernel<<<blocksForAll, kThreadsPerBlock>>>(
         cache.dInBatch,
@@ -534,6 +544,7 @@ bool runHipPipeline(
     cleanupFrameBuffers();
     return true;
 
+#undef CHD_HIPFFT_CHECK_OR_CLEANUP
 #undef CHD_HIP_CHECK_OR_CLEANUP
 }
 

@@ -2,6 +2,7 @@
 
 #include "nntransform3d_window.h"
 
+#include <algorithm>
 #include <cmath>
 #include <mutex>
 
@@ -33,6 +34,38 @@ const SineWindows &getSineWindows()
         }
     });
     return g_windows;
+}
+
+namespace {
+
+// Smallest lattice position whose tile still reaches `first`.
+int32_t firstTile(int32_t anchor, int32_t step, int32_t size, int32_t first)
+{
+    const int32_t distance = (first - (size - 1)) - anchor;
+    const int32_t steps = (distance >= 0) ? (distance + step - 1) / step : -((-distance) / step);
+    return anchor + (steps * step);
+}
+
+}  // namespace
+
+TileGrid makeTileGrid(const chd::metadata::LdDecodeMetaData::VideoParameters &vp)
+{
+    // asdfqazsnbb's harnesses tile NTSC frame lines 40..524 from line 32.
+    constexpr int32_t kAreaFirstLine = 40;
+    constexpr int32_t kAreaLastLine  = 524;
+    constexpr int32_t kLineAnchor    = 32;
+
+    const int32_t lastStoredLine = (vp.fieldHeight * 2) - 2;
+    const int32_t pictureStart = (vp.pictureStart >= 0) ? vp.pictureStart : vp.activeVideoStart;
+
+    TileGrid grid;
+    grid.firstLine   = std::min(kAreaFirstLine, vp.firstActiveFrameLine);
+    grid.lastLine    = std::min(std::max(kAreaLastLine, vp.lastActiveFrameLine), lastStoredLine);
+    grid.firstSample = (vp.tileReadStart >= 0) ? vp.tileReadStart : vp.activeVideoStart;
+    grid.endSample   = (vp.tileReadEnd >= 0) ? vp.tileReadEnd : vp.activeVideoEnd;
+    grid.startY = firstTile(kLineAnchor, kStepY, kNy, grid.firstLine);
+    grid.startX = firstTile(pictureStart - (kNx / 2), kStepX, kNx, grid.firstSample);
+    return grid;
 }
 
 }  // namespace chd::decoders::nntransform3d

@@ -193,6 +193,14 @@ makeVideoParameters(const VideoStandardPreset &preset,
     }
     vp.activeVideoEnd = vp.activeVideoStart + preset.digitalActiveSamples;
 
+    // The picture inside that digital line, where a .tbc of the same signal
+    // would report it: the ld-decode window, or ld-chroma-encoder's.
+    if (preset.standard == VideoStandard::NTSC) {
+        const bool syncStart = alignment == HorizontalAlignment::SYNC_START;
+        vp.pictureStart = syncStart ? 134 : 147;
+        vp.pictureEnd   = syncStart ? 894 : 905;
+    }
+
     vp.isMapped = false;
     vp.isValid  = true;
     return vp;

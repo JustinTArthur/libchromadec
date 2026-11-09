@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -915,6 +916,43 @@ int testActiveLineCropBounds(const fs::path &dir) {
     return 0;
 }
 
+// ─── Test: the NN magnitude scale must be finite and positive. ─────────────
+int testNnMagnitudeScaleRange(const fs::path &dir) {
+    if (chd_has_feature("nn") != 1) return 0;
+
+    const std::string tbc     = (dir / "nn_scale.tbc").string();
+    const std::string sidecar = (dir / "nn_scale.tbc.db").string();
+    REQUIRE(writeBlackTbc(tbc, 910, 263, 4));
+    REQUIRE(writeTbcSidecar(sidecar, 4));
+
+    chd_video_t *video = nullptr;
+    REQUIRE(chd_video_open_composite(tbc.c_str(), sidecar.c_str(), nullptr, &video) == CHD_OK);
+
+    // No model is attached, so even a valid scale fails commit; what matters
+    // is whether the scale check is the reason.
+    auto scaleRejected = [&](double scale) {
+        chd_decoder_t *dec = nullptr;
+        if (chd_decoder_create(video, CHD_DEC_NN_TRANSFORM3D, &dec) != CHD_OK) return false;
+        chd_decoder_set_option_f64(dec, CHD_OPT_NN_INPUT_MAGNITUDE_SCALE, scale);
+        const chd_status_t rc = chd_decoder_commit(dec);
+        const bool rejected = rc == CHD_E_INVALID_ARG
+            && std::string(chd_last_error()).find("nn_input_magnitude_scale") != std::string::npos;
+        chd_decoder_free(dec);
+        return rejected;
+    };
+
+    REQUIRE(scaleRejected(0.0));
+    REQUIRE(scaleRejected(-128.0));
+    REQUIRE(scaleRejected(std::numeric_limits<double>::infinity()));
+    REQUIRE(scaleRejected(std::numeric_limits<double>::quiet_NaN()));
+    REQUIRE(!scaleRejected(128.0));
+
+    chd_video_free(video);
+    fs::remove(tbc);
+    fs::remove(sidecar);
+    return 0;
+}
+
 // ─── Test: float output formats expose normalized E'Y E'Cb E'Cr. ───────────
 //
 // Black NTSC input → E'Y = 0.0 (black) and neutral chroma E'Cb = E'Cr = 0.0,
@@ -1748,6 +1786,7 @@ int main() {
     if (int rc = testReverseFieldOrder(dir);          rc != 0) return rc;
     if (int rc = testActiveLineSidecarOverride(dir);  rc != 0) return rc;
     if (int rc = testActiveLineCropBounds(dir);       rc != 0) return rc;
+    if (int rc = testNnMagnitudeScaleRange(dir);      rc != 0) return rc;
     if (int rc = testFloatOutputFormats(dir);         rc != 0) return rc;
     if (int rc = testRgbsOutputFormat(dir);           rc != 0) return rc;
     if (int rc = testOutputClampOption(dir);          rc != 0) return rc;

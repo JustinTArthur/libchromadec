@@ -21,6 +21,7 @@
 #include <mutex>
 #include <vector>
 
+#include "nntransform3d_window.h"
 #include "../../metadata/core.h"
 
 namespace chd::nn { class OrtSession; }
@@ -38,8 +39,11 @@ namespace chd::decoders::nntransform3d {
 // false and the caller falls back to the 2D chroma path.
 bool runHipPipeline(
     const chd::metadata::LdDecodeMetaData::VideoParameters &videoParameters,
+    const TileGrid &grid,
     const uint16_t *currentRaw,
     const uint16_t *nextRaw,
+    bool padF0,  // currentRaw is black padding, not picture
+    bool padF1,  // likewise for nextRaw
     std::vector<std::vector<double>> &currentAccChroma,
     std::vector<std::vector<double>> &currentWeightSum,
     std::vector<std::vector<double>> &nextAccChroma,

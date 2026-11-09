@@ -389,8 +389,11 @@ void unflattenFrom(std::vector<std::vector<double>> &dst, const double *src,
 
 bool runCudaPipeline(
     const chd::metadata::LdDecodeMetaData::VideoParameters &videoParameters,
+    const TileGrid &grid,
     const uint16_t *currentRaw,
     const uint16_t *nextRaw,
+    bool padF0,
+    bool padF1,
     std::vector<std::vector<double>> &currentAccChroma,
     std::vector<std::vector<double>> &currentWeightSum,
     std::vector<std::vector<double>> &nextAccChroma,
@@ -400,15 +403,15 @@ bool runCudaPipeline(
     double inputMagnitudeScale,
     int deviceId)
 {
-    const int32_t firstActiveY = videoParameters.firstActiveFrameLine;
-    const int32_t lastActiveY  = videoParameters.lastActiveFrameLine;
-    const int32_t activeStartX = videoParameters.activeVideoStart;
-    const int32_t activeEndX   = videoParameters.activeVideoEnd;
+    const int32_t firstActiveY = grid.firstLine;
+    const int32_t lastActiveY  = grid.lastLine;
+    const int32_t activeStartX = grid.firstSample;
+    const int32_t activeEndX   = grid.endSample;
     const int32_t fieldWidth   = videoParameters.fieldWidth;
     const int32_t frameHeight  = (videoParameters.fieldHeight * 2) - 1;
 
-    const int32_t startY = firstActiveY - (kNy / 2);
-    const int32_t startX = activeStartX - (kNx / 2);
+    const int32_t startY = grid.startY;
+    const int32_t startX = grid.startX;
 
     // Build the ledger (block top-left coordinates) on the host first;
     // it determines numBlocks which sizes all the device buffers.
@@ -474,6 +477,16 @@ bool runCudaPipeline(
     } \
 } while (0)
 
+#define CHD_CUFFT_CHECK_OR_CLEANUP(expr) do { \
+    cufftResult _err = (expr); \
+    if (_err != CUFFT_SUCCESS) { \
+        chd::log::warn() << "nnTransform3D[CUDA]: " #expr " failed with cuFFT code" \
+                         << static_cast<int>(_err); \
+        cleanupFrameBuffers(); \
+        return false; \
+    } \
+} while (0)
+
     CHD_CUDA_CHECK_OR_CLEANUP(cudaMalloc(&dCvbsF0, cvbsBytes));
     CHD_CUDA_CHECK_OR_CLEANUP(cudaMalloc(&dCvbsF1, cvbsBytes));
     CHD_CUDA_CHECK_OR_CLEANUP(cudaMalloc(&dAccF0,  accBytes));
@@ -504,13 +517,6 @@ bool runCudaPipeline(
     const int blocksForAll    = (totalElements + kThreadsPerBlock - 1) / kThreadsPerBlock;
     const int blockSize       = static_cast<int>(kNt * kNy * kNx);
 
-    // Per the reference: padding flags for boundary frames. In our flow both
-    // frames are always valid (Comb::decodeFrames pads via a duplicated
-    // frame in getFrameBuffer), so both are non-padding. Kept as
-    // parameters for future caller-set look-behind/look-ahead.
-    constexpr bool padF0 = false;
-    constexpr bool padF1 = false;
-
     calcDCKernel<<<blocksForLedger, kThreadsPerBlock>>>(
         dCvbsF0, dCvbsF1, padF0, padF1,
         cache.dLedgerY, cache.dLedgerX, cache.dLedgerDc,
@@ -526,7 +532,7 @@ bool runCudaPipeline(
         firstActiveY, lastActiveY, fieldWidth);
     CHD_CUDA_CHECK_OR_CLEANUP(cudaDeviceSynchronize());
 
-    CHD_CUFFT_CHECK(cufftExecZ2Z(cache.pFwd, cache.dInBatch, cache.dOutBatch, CUFFT_FORWARD));
+    CHD_CUFFT_CHECK_OR_CLEANUP(cufftExecZ2Z(cache.pFwd, cache.dInBatch, cache.dOutBatch, CUFFT_FORWARD));
 
     calcMagnitudeKernel<<<blocksForAll, kThreadsPerBlock>>>(
         cache.dOutBatch, cache.dTrtInput,
@@ -565,7 +571,7 @@ bool runCudaPipeline(
         cache.dOutBatch, cache.dMask, totalElements);
     CHD_CUDA_CHECK_OR_CLEANUP(cudaDeviceSynchronize());
 
-    CHD_CUFFT_CHECK(cufftExecZ2Z(cache.pInv, cache.dOutBatch, cache.dInBatch, CUFFT_INVERSE));
+    CHD_CUFFT_CHECK_OR_CLEANUP(cufftExecZ2Z(cache.pInv, cache.dOutBatch, cache.dInBatch, CUFFT_INVERSE));
 
     olaKernel<<<blocksForAll, kThreadsPerBlock>>>(
         cache.dInBatch,
@@ -591,6 +597,7 @@ bool runCudaPipeline(
     cleanupFrameBuffers();
     return true;
 
+#undef CHD_CUFFT_CHECK_OR_CLEANUP
 #undef CHD_CUDA_CHECK_OR_CLEANUP
 }
 

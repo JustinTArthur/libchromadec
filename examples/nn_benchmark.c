@@ -205,7 +205,7 @@ static void run_cell(const struct run_config *cfg, struct cell *cell)
     chd_decoder_set_option_i32(dec, CHD_OPT_THREAD_COUNT, cfg->threads);
     chd_decoder_set_option_i32(dec, CHD_OPT_PADDING_MULTIPLE, 1);
     if (cfg->scale >= 0.0 &&
-        chd_decoder_has_option(dec, CHD_OPT_NN_INPUT_MAGNITUDE_SCALE) == 1) {
+        chd_decoder_has_option(dec, CHD_OPT_NN_INPUT_MAGNITUDE_SCALE) == CHD_OK) {
         chd_decoder_set_option_f64(dec, CHD_OPT_NN_INPUT_MAGNITUDE_SCALE, cfg->scale);
     }
     if (model) {

@@ -984,7 +984,7 @@ and any decoder-kind restriction.
 | `CHD_OPT_LAST_ACTIVE_SAMPLE`        | i32  | Last active sample (inclusive, 0-indexed).                                                                                   |
 | `CHD_OPT_FIRST_ACTIVE_FRAME_LINE`   | i32  | First active frame line (inclusive, 0-indexed woven frame line).                                                             |
 | `CHD_OPT_LAST_ACTIVE_FRAME_LINE`    | i32  | Last active frame line (inclusive, 0-indexed woven — the line is included in the output).                                    |
-| `CHD_OPT_NN_INPUT_MAGNITUDE_SCALE`  | f64  | nnTransform3D input magnitude scale.                                                                                         |
+| `CHD_OPT_NN_INPUT_MAGNITUDE_SCALE`  | f64  | nnTransform3D input magnitude scale; must be finite and > 0.                                                                 |
 | `CHD_OPT_NN_CHROMA_BANDPASS`        | bool | ldzeug2 luma-sep chroma bandpass.                                                                                            |
 | `CHD_OPT_HVD_CG_ITERATIONS`         | i32  | HVD kinds only: total conjugate-gradient iterations across the solver's outer passes (default `2`, the fast setting; `0` decodes with the holographic init alone). See [HVD decoders](#hvd-decoders). |
 | `CHD_OPT_HVD_TEMPORAL_STRENGTH`     | f64  | `CHD_DEC_HVD_3D` only: cross-field data-term weight. `0` (default) adapts per window to the measured Y/C ambiguity; a positive value forces that fixed strength. See [HVD decoders](#hvd-decoders). |

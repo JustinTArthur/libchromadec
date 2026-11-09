@@ -232,7 +232,7 @@ Full pipeline, per frame (I/O → demod → NN → YUV):
 
 | model | native CoreML | ORT CPU (1 thread) | ORT CoreML EP |
 |---|---|---|---|
-| nnTransform3D `chroma_net` | ≈ 0.78 s | ≈ 25 s | ≈ 27 s |
+| nnTransform3D `chroma_net` | ≈ 1.56 s | ≈ 51 s | ≈ 55 s |
 | ldzeug2 `color_cnn` (field) | ≈ 18 ms | ≈ 1.5 s | ≈ 157 ms |
 | ldzeug2 `luma_sep` (field) | ≈ 42 ms | ≈ 5.9 s | ≈ 314 ms |
 
@@ -242,7 +242,7 @@ partition overhead, landing slightly *slower* than plain CPU.
 
 For `chroma_net` v2, an **fp16 package with `CHD_NN_COREML_ALL`** moves the
 convolution to the ANE and is the fastest macOS configuration measured — with
-the default FFTW FFT, ≈ 0.52 s/frame vs ≈ 0.77 s for the fp32/GPU package on
+the default FFTW FFT, ≈ 1.04 s/frame vs ≈ 1.56 s for the fp32/GPU package on
 one M4 Max (chips differ: the ANE-to-GPU ratio varies by generation, so
 benchmark per machine, e.g. `examples/nn_benchmark -b coreml_native -M
 chroma_net_fp16.mlpackage -s 128 -u all`). On the **GPU**, fp16 is slightly
@@ -296,6 +296,12 @@ The ONNX graph (opset 11; `Conv` / `LeakyRelu` / `Add` / `Sigmoid`) is:
 |---|---|---|---|
 | input | `[N, 2, 4, 16, 16]` | float32 | Per-block amplitude spectrum; channel 0 is the spectrum, channel 1 a reference (point-reflected) copy. `N` = number of blocks (batched). |
 | output | `[N, 1, 4, 16, 16]` | float32 | Single-channel separation mask (sigmoid, 0..1). |
+
+### Tile placement
+
+nnTransform3D's tiles sit on a lattice anchored to the source's picture, not to
+the active crop, so tightening a crop only trims the output. Tiles read the
+source's picture window, plus any crop you set outside it.
 
 ### Model series and the magnitude scale
 

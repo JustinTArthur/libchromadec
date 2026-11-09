@@ -192,6 +192,10 @@ private:
         // Baseband samples (interlaced to form a complete frame)
         chd::reader::Data rawbuffer;
 
+        // True until real fields are loaded. A padding frame holds no picture,
+        // so nnTransform3D tile passes neither read it nor write into it.
+        bool isPadding = true;
+
         // Chroma phase of the frame's two fields
         int32_t firstFieldPhaseID;
         int32_t secondFieldPhaseID;

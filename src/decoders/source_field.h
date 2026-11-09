@@ -39,6 +39,9 @@ struct SourceField {
     chd::metadata::LdDecodeMetaData::Field field;
     chd::reader::Data data;
 
+    // Black placeholder for a frame outside the input.
+    bool isPadding = false;
+
     // Load a sequence of frames from the input files.
     //
     // fields will contain {lookbehind fields... [startIndex] real fields... [endIndex] lookahead fields...}.

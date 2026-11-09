@@ -98,6 +98,17 @@ public:
         int32_t firstActiveFieldLine() const { return (firstActiveFrameLine + 1) / 2; }
         int32_t lastActiveFieldLine()  const { return lastActiveFrameLine / 2; }
 
+        // The source's picture window (half-open), unaffected by caller crops.
+        // -1 until resolved: a source that knows it sets it, otherwise it is
+        // the active window the source reports.
+        int32_t pictureStart = -1;
+        int32_t pictureEnd = -1;
+
+        // The horizontal window tile-based NN decoders read (half-open): the
+        // picture window, widened by any crop the caller set. -1 until resolved.
+        int32_t tileReadStart = -1;
+        int32_t tileReadEnd = -1;
+
         // Flags if our data has been initialized yet
         bool isValid = false;
 

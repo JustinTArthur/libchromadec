@@ -325,8 +325,11 @@ ResidentMps &residentMps()
 
 bool runCoreMLPipeline(
     const chd::metadata::LdDecodeMetaData::VideoParameters &videoParameters,
+    const TileGrid &grid,
     const uint16_t *currentRaw,
     const uint16_t *nextRaw,
+    bool padF0,
+    bool padF1,
     std::vector<std::vector<double>> &currentAccChroma,
     std::vector<std::vector<double>> &currentWeightSum,
     std::vector<std::vector<double>> &nextAccChroma,
@@ -335,14 +338,14 @@ bool runCoreMLPipeline(
     std::mutex &runMutex,
     double inputMagnitudeScale)
 {
-    const int32_t firstActiveY = videoParameters.firstActiveFrameLine;
-    const int32_t lastActiveY  = videoParameters.lastActiveFrameLine;
-    const int32_t activeStartX = videoParameters.activeVideoStart;
-    const int32_t activeEndX   = videoParameters.activeVideoEnd;
+    const int32_t firstActiveY = grid.firstLine;
+    const int32_t lastActiveY  = grid.lastLine;
+    const int32_t activeStartX = grid.firstSample;
+    const int32_t activeEndX   = grid.endSample;
     const int32_t fieldWidth   = videoParameters.fieldWidth;
 
-    const int32_t startY = firstActiveY - (kNy / 2);
-    const int32_t startX = activeStartX - (kNx / 2);
+    const int32_t startY = grid.startY;
+    const int32_t startX = grid.startX;
 
     // Block top-left coordinates (matches the CUDA ledger + CPU body loop).
     std::vector<int> ledgerY;
@@ -363,6 +366,7 @@ bool runCoreMLPipeline(
     const double invScale = (inputMagnitudeScale != 0.0) ? (1.0 / inputMagnitudeScale) : 1.0;
 
     const uint16_t *frames[2] = { currentRaw, nextRaw };
+    const bool padding[2] = { padF0, padF1 };
     std::vector<std::vector<double>> *accFor[2]    = { &currentAccChroma, &nextAccChroma };
     std::vector<std::vector<double>> *weightFor[2] = { &currentWeightSum, &nextWeightSum };
 
@@ -423,6 +427,7 @@ bool runCoreMLPipeline(
             int32_t sampleCount = 0;
             for (int32_t t = 0; t < kNt; ++t) {
                 const bool oddField = (t % 2) != 0;
+                if (padding[t / 2]) continue;
                 const uint16_t *cvbs = frames[t / 2];
                 for (int32_t dy = 0; dy < kNy; ++dy) {
                     const int32_t absY = y + dy;
@@ -452,7 +457,7 @@ bool runCoreMLPipeline(
                         const int32_t absX = x + dx;
                         const bool xActive = absX >= activeStartX && absX < activeEndX;
                         double *cell = tile[idx3(t, dy, dx)];
-                        if (yActive && xActive && (oddLine == oddField)) {
+                        if (!padding[t / 2] && yActive && xActive && (oddLine == oddField)) {
                             cell[0] = (cell[0] - blockDc) * winT[t] * winY[dy] * winX[dx];
                         } else {
                             cell[0] = 0.0;
@@ -580,6 +585,7 @@ bool runCoreMLPipeline(
             const fftw_complex *tile = inBatch + static_cast<size_t>(j) * kBlockSize;
             for (int32_t t = 0; t < kNt; ++t) {
                 const bool oddField = (t % 2) != 0;
+                if (padding[t / 2]) continue;
                 std::vector<std::vector<double>> &acc    = *accFor[t / 2];
                 std::vector<std::vector<double>> &weight = *weightFor[t / 2];
                 for (int32_t dy = 0; dy < kNy; ++dy) {

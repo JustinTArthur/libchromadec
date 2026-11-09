@@ -112,6 +112,9 @@ void SourceField::loadFields(chd::reader::ISource &sourceVideo, chd::metadata::L
 
         const uint16_t black = videoParameters.black16bIre;
 
+        fields[i].isPadding = useBlankFrame;
+        fields[i + 1].isPadding = useBlankFrame;
+
         if (useBlankFrame) {
             // Fill both fields with black
             fields[i].data.assign(sourceVideo.getFieldLength(), black);

@@ -122,10 +122,7 @@ int32_t Comb::Configuration::getLookBehind() const {
 int32_t Comb::Configuration::getLookAhead() const {
     if (dimensions == 3) {
         // ... and also the next frame
-        // nnTransform3D walks tiles that span the frame boundary, so it
-        // needs one *additional* future frame for the overlap-add buffer
-        // to land in.
-        return nnTransform3D ? 2 : 1;
+        return 1;
     }
 
     return 0;
@@ -211,26 +208,34 @@ void Comb::decodeFrames(const std::vector<chd::decoders::SourceField> &inputFiel
             return frameBuffer;
         };
 
+        const auto runNnPass = [&](FrameBuffer &first, FrameBuffer &second) {
+            if (nnSession != nullptr) {
+                return first.split3DnnTransform(second, *nnSession, nnRunMutex,
+                                                configuration.nnInputMagnitudeScale);
+            }
+            static std::once_flag noSessionWarnedOnce;
+            std::call_once(noSessionWarnedOnce, []() {
+                chd::log::warn() << "nnTransform3D enabled but no NN session bound; falling back to 2D chroma";
+            });
+            return false;
+        };
+
+        // A frame is complete only after both tile passes that overlap it,
+        // (N-1,N) and (N,N+1). The first frame of a call takes (N-1,N) from the
+        // look-behind frame; later ones got it on the previous iteration.
+        bool backwardPassCompleted = runNnPass(*getFrameBuffer(-1), *getFrameBuffer(0));
+        frameBuffers.erase(-1);
+
         for (int32_t frameIndex = 0; frameIndex < frameCount; frameIndex++) {
             auto currentFrameBuffer = getFrameBuffer(frameIndex);
             auto nextFrameBuffer    = getFrameBuffer(frameIndex + 1);
 
-            bool nnCompleted = false;
-            if (nnSession != nullptr) {
-                nnCompleted = currentFrameBuffer->split3DnnTransform(
-                    *nextFrameBuffer, *nnSession, nnRunMutex,
-                    configuration.nnInputMagnitudeScale);
-            } else {
-                static std::once_flag noSessionWarnedOnce;
-                std::call_once(noSessionWarnedOnce, []() {
-                    chd::log::warn() << "nnTransform3D enabled but no NN session bound; falling back to 2D chroma";
-                });
-            }
+            const bool forwardPassCompleted = runNnPass(*currentFrameBuffer, *nextFrameBuffer);
 
             componentFrames[frameIndex].init(videoParameters);
             currentFrameBuffer->setComponentFrame(componentFrames[frameIndex]);
             currentFrameBuffer->copyRawToLuma();
-            if (nnCompleted) {
+            if (backwardPassCompleted && forwardPassCompleted) {
                 currentFrameBuffer->finalizeNnTransform3D();
             } else {
                 currentFrameBuffer->fallbackNnTransform3DTo2D();
@@ -247,6 +252,7 @@ void Comb::decodeFrames(const std::vector<chd::decoders::SourceField> &inputFiel
             currentFrameBuffer->doYNR();
             currentFrameBuffer->transformIQ(configuration.chromaGain, configuration.chromaPhase);
 
+            backwardPassCompleted = forwardPassCompleted;
             frameBuffers.erase(frameIndex);
         }
         return;
@@ -386,6 +392,8 @@ void Comb::FrameBuffer::loadFields(const chd::decoders::SourceField &firstField,
                          secondField.data.begin() + ((fieldLine + 1) * videoParameters.fieldWidth));
         fieldLine++;
     }
+
+    isPadding = firstField.isPadding || secondField.isPadding;
 
     // Set the phase IDs for the frame
     firstFieldPhaseID = firstField.field.fieldPhaseID;
@@ -1002,6 +1010,8 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
     using nntransform3d::kStepX;
     using nntransform3d::kStepY;
 
+    const nntransform3d::TileGrid grid = nntransform3d::makeTileGrid(videoParameters);
+
     // Lazy-allocate the overlap-add accumulators on both this frame and
     // the next frame. Sized frameHeight × fieldWidth.
     auto ensureNnBuffers = [this](FrameBuffer &fb) {
@@ -1030,8 +1040,10 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
         if (coreMLEngine) {
             return chd::decoders::nntransform3d::runCoreMLPipeline(
                 videoParameters,
+                grid,
                 rawbuffer.data(),
                 nextFrame.rawbuffer.data(),
+                isPadding, nextFrame.isPadding,
                 nnAccChroma, nnWeightSum,
                 nextFrame.nnAccChroma, nextFrame.nnWeightSum,
                 *coreMLEngine, runMutex, inputMagnitudeScale);
@@ -1051,8 +1063,10 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
     if (ortEngine && (activeBackend == CHD_NN_ORT_CUDA || activeBackend == CHD_NN_ORT_TENSORRT)) {
         return chd::decoders::nntransform3d::runCudaPipeline(
             videoParameters,
+            grid,
             rawbuffer.data(),
             nextFrame.rawbuffer.data(),
+            isPadding, nextFrame.isPadding,
             nnAccChroma, nnWeightSum,
             nextFrame.nnAccChroma, nextFrame.nnWeightSum,
             ortEngine->ortSession(), runMutex, inputMagnitudeScale,
@@ -1063,8 +1077,10 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
     if (ortEngine && activeBackend == CHD_NN_ORT_MIGRAPHX) {
         return chd::decoders::nntransform3d::runHipPipeline(
             videoParameters,
+            grid,
             rawbuffer.data(),
             nextFrame.rawbuffer.data(),
+            isPadding, nextFrame.isPadding,
             nnAccChroma, nnWeightSum,
             nextFrame.nnAccChroma, nextFrame.nnWeightSum,
             ortEngine->ortSession(), runMutex, inputMagnitudeScale,
@@ -1104,11 +1120,12 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
     auto *out = tileSpectrum;
 
     FrameBuffer *frames[2] = { this, &nextFrame };
+    const bool padding[2] = { isPadding, nextFrame.isPadding };
 
-    const int32_t startY = videoParameters.firstActiveFrameLine - (kNy / 2);
-    const int32_t endY   = videoParameters.lastActiveFrameLine;
-    const int32_t startX = videoParameters.activeVideoStart - (kNx / 2);
-    const int32_t endX   = videoParameters.activeVideoEnd;
+    const int32_t startY = grid.startY;
+    const int32_t endY   = grid.lastLine;
+    const int32_t startX = grid.startX;
+    const int32_t endX   = grid.endSample;
 
     for (int32_t y = startY; y <= endY; y += kStepY) {
         for (int32_t x = startX; x < endX; x += kStepX) {
@@ -1120,14 +1137,15 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
             int32_t sampleCount = 0;
 
             for (int32_t frameOffset = 0; frameOffset < 2; frameOffset++) {
+                if (padding[frameOffset]) continue;
                 for (int32_t subField = 0; subField < 2; subField++) {
                     const int32_t t = (frameOffset * 2) + subField;
                     const bool oddField = (t % 2) != 0;
 
                     for (int32_t dy = 0; dy < kNy; dy++) {
                         const int32_t absY = y + dy;
-                        const bool yActive = absY >= videoParameters.firstActiveFrameLine
-                                             && absY <= videoParameters.lastActiveFrameLine;
+                        const bool yActive = absY >= grid.firstLine
+                                             && absY <= grid.lastLine;
                         const bool oddLine = (absY % 2) != 0;
                         if (!yActive || (oddLine != oddField)) continue;
 
@@ -1135,8 +1153,8 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
                                                    + (absY * videoParameters.fieldWidth);
                         for (int32_t dx = 0; dx < kNx; dx++) {
                             const int32_t absX = x + dx;
-                            const bool xActive = absX >= videoParameters.activeVideoStart
-                                                 && absX < videoParameters.activeVideoEnd;
+                            const bool xActive = absX >= grid.firstSample
+                                                 && absX < grid.endSample;
                             if (!xActive) continue;
 
                             const int32_t index = IDX3(t, dy, dx, kNt, kNy, kNx);
@@ -1158,16 +1176,16 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
                 const bool oddField = (t % 2) != 0;
                 for (int32_t dy = 0; dy < kNy; dy++) {
                     const int32_t absY = y + dy;
-                    const bool yActive = absY >= videoParameters.firstActiveFrameLine
-                                         && absY <= videoParameters.lastActiveFrameLine;
+                    const bool yActive = absY >= grid.firstLine
+                                         && absY <= grid.lastLine;
                     const bool oddLine = (absY % 2) != 0;
                     for (int32_t dx = 0; dx < kNx; dx++) {
                         const int32_t absX = x + dx;
-                        const bool xActive = absX >= videoParameters.activeVideoStart
-                                             && absX < videoParameters.activeVideoEnd;
+                        const bool xActive = absX >= grid.firstSample
+                                             && absX < grid.endSample;
                         const int32_t index = IDX3(t, dy, dx, kNt, kNy, kNx);
 
-                        if (yActive && xActive && (oddLine == oddField)) {
+                        if (!padding[t / 2] && yActive && xActive && (oddLine == oddField)) {
                             in[index][0] = (in[index][0] - blockDc) * winT[t] * winY[dy] * winX[dx];
                         } else {
                             in[index][0] = 0.0;
@@ -1245,19 +1263,20 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
             // normalise in finalizeNnTransform3D.
             for (int32_t t = 0; t < kNt; t++) {
                 const int32_t targetFrameIndex = t / 2;
+                if (padding[targetFrameIndex]) continue;
                 const bool oddField = (t % 2) != 0;
                 FrameBuffer *targetFrame = frames[targetFrameIndex];
 
                 for (int32_t dy = 0; dy < kNy; dy++) {
                     const int32_t absY = y + dy;
-                    if (absY < videoParameters.firstActiveFrameLine
-                        || absY > videoParameters.lastActiveFrameLine) continue;
+                    if (absY < grid.firstLine
+                        || absY > grid.lastLine) continue;
                     if ((absY % 2 != 0) != oddField) continue;
 
                     for (int32_t dx = 0; dx < kNx; dx++) {
                         const int32_t absX = x + dx;
-                        if (absX < videoParameters.activeVideoStart
-                            || absX >= videoParameters.activeVideoEnd) continue;
+                        if (absX < grid.firstSample
+                            || absX >= grid.endSample) continue;
 
                         const int32_t index = IDX3(t, dy, dx, kNt, kNy, kNx);
                         const double value  = in[index][0] / static_cast<double>(kNt * kNy * kNx);

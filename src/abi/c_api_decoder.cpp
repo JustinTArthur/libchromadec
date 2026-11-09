@@ -103,6 +103,13 @@ void applyCropOverrides(chd::metadata::LdDecodeMetaData::VideoParameters &vp,
     apply(CHD_OPT_FIRST_ACTIVE_SAMPLE,     vp.activeVideoStart);
     // The sample crop is inclusive on the ABI and half-open in VideoParameters.
     apply(CHD_OPT_LAST_ACTIVE_SAMPLE,      vp.activeVideoEnd, 1);
+
+    if (o.i32.count(CHD_OPT_FIRST_ACTIVE_SAMPLE) != 0) {
+        vp.tileReadStart = std::min(vp.tileReadStart, vp.activeVideoStart);
+    }
+    if (o.i32.count(CHD_OPT_LAST_ACTIVE_SAMPLE) != 0) {
+        vp.tileReadEnd = std::max(vp.tileReadEnd, vp.activeVideoEnd);
+    }
 }
 
 // Reject a crop that leaves the stored row, or that selects nothing. The
@@ -725,6 +732,16 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
     }
 
     {
+        auto it = d->optionMaps.f64.find(CHD_OPT_NN_INPUT_MAGNITUDE_SCALE);
+        if (it != d->optionMaps.f64.end()
+            && (!std::isfinite(it->second) || it->second <= 0.0)) {
+            chd::detail::set_last_error(
+                "chd_decoder_commit: nn_input_magnitude_scale must be finite and > 0");
+            return CHD_E_INVALID_ARG;
+        }
+    }
+
+    {
         // HVD solver budget: 0 (init-only decode) is meaningful, negative
         // is not. -1 is the registry's internal keep-engine-default marker,
         // so it must not arrive through the option surface.
@@ -753,6 +770,12 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
         return CHD_E_METADATA_MISSING;
     }
     chd::metadata::LdDecodeMetaData::VideoParameters vp = meta->getVideoParameters();
+    if (vp.pictureStart < 0) {
+        vp.pictureStart = vp.activeVideoStart;
+        vp.pictureEnd   = vp.activeVideoEnd;
+    }
+    vp.tileReadStart = vp.pictureStart;
+    vp.tileReadEnd   = vp.pictureEnd;
     applyCropOverrides(vp, d->optionMaps);
     if (const chd_status_t s = validateCrop(vp); s != CHD_OK) return s;
 
