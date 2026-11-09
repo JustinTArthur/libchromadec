@@ -128,11 +128,14 @@ impl ComputePrecision {
 /// Compiled-engine cache directory policy (`engine_cache_dir`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum EngineCacheDir {
-    /// Library picks a per-user cache directory.
+    /// Library picks a per-user cache directory. The MIGraphX provider built
+    /// into ONNX Runtime goes uncached instead.
     #[default]
     Auto,
     /// No caching; recompile on every load.
     Disabled,
+    /// This directory. For the MIGraphX provider built into ONNX Runtime, it
+    /// has to be unique to one input shape.
     Path(PathBuf),
 }
 

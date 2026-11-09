@@ -71,8 +71,15 @@ typedef struct chd_nn_session_opts {
      *   ""    → caching disabled (recompile every load, useful for CI /
      *           hermetic tests / cold-start benchmarking).
      *   path  → use this absolute path (created if it doesn't exist).
-     * Currently honoured by the TensorRT and MIGraphX EPs; the CUDA EP
-     * uses its own internal PTX cache that isn't configurable here. */
+     * Currently honored by the TensorRT and MIGraphX EPs; the CUDA EP
+     * uses its own internal PTX cache that isn't configurable here.
+     *
+     * The MIGraphX EP built into ONNX Runtime reuses a program compiled for
+     * one input shape on any other shape of the same model, even after a
+     * restart. On that EP, NULL therefore means no cache, and a path has to
+     * be unique to one input shape (frame or tile batch size): include the
+     * dimensions in it, and don't run other shapes through the loaded model.
+     * The MIGraphX plugin EP is not affected and takes any of the above. */
     const char *engine_cache_dir;
 
     /* Compute precision the backend may use for inference; see

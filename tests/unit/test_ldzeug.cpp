@@ -16,8 +16,10 @@
 
 #include "nn_test_model.h"
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -32,8 +34,12 @@
 #include "../../src/decoders/ldzeug/ldzeug_color_cnn.h"
 #include "../../src/decoders/ldzeug/ldzeug_luma_sep.h"
 #include "../../src/metadata/core.h"
+#include "../../src/decoders/source_field.h"
+#include "../../src/nn/inference_engine.h"
 #include "../../src/nn/ort_engine.h"
 #include "../../src/nn/ort_session.h"
+#include "../../src/nn/provider_select.h"
+#include "../../src/output/component_frame.h"
 #endif
 
 namespace {
@@ -215,6 +221,115 @@ int testRejectsNonNtsc() {
     return 0;
 }
 
+// An engine that echoes the requested shape, with any dimension replaced by a
+// non-negative override, the way a stale compiled program would. Its buffer
+// matches the shape it reports, so reading past it is caught under ASan.
+class FakeEngine : public chd::nn::InferenceEngine {
+public:
+    struct Overrides {
+        int64_t height = -1;
+        int64_t width = -1;
+        bool dropChannelDim = false;
+    };
+    explicit FakeEngine(Overrides o) : overrides_(o) {}
+
+    std::unique_ptr<chd::nn::RunResult> run(
+        const std::vector<chd::nn::TensorSpec> &inputs,
+        const std::vector<std::string> & = {}) override {
+        std::vector<int64_t> shape = inputs.at(0).shape;
+        if (overrides_.height >= 0) shape[2] = overrides_.height;
+        if (overrides_.width >= 0) shape[3] = overrides_.width;
+        if (overrides_.dropChannelDim) shape.erase(shape.begin() + 1);
+        return std::make_unique<Result>(std::move(shape));
+    }
+    chd_nn_backend_t activeBackend() const override { return CHD_NN_ORT_CPU; }
+    const std::vector<std::string> &inputNames() const override { return names_; }
+    const std::vector<std::string> &outputNames() const override { return names_; }
+
+private:
+    class Result : public chd::nn::RunResult {
+    public:
+        explicit Result(std::vector<int64_t> shape) : shape_(std::move(shape)) {
+            size_t n = 1;
+            for (const int64_t d : shape_) n *= static_cast<size_t>(d);
+            data_.resize(n);
+        }
+        size_t count() const override { return 1; }
+        const float *data(size_t) const override { return data_.data(); }
+        std::vector<int64_t> shape(size_t) const override { return shape_; }
+
+    private:
+        std::vector<int64_t> shape_;
+        std::vector<float> data_;
+    };
+
+    Overrides overrides_;
+    std::vector<std::string> names_;
+};
+
+// Decode one frame through a FakeEngine; true if the decoder threw.
+template <typename DecoderT>
+bool decodeThrows(chd::decoders::ldzeug::LdzeugDecoderBase::Mode mode,
+                  FakeEngine::Overrides overrides) {
+    const auto vp = makeNtscVp();
+    DecoderT decoder;
+    decoder.setNnModel(std::make_shared<FakeEngine>(overrides));
+    decoder.setMode(mode);
+    if (!decoder.configure(vp)) throw std::logic_error("configure failed");
+
+    std::vector<chd::decoders::SourceField> fields(2);
+    for (int i = 0; i < 2; ++i) {
+        fields[i].field.isFirstField = (i == 0);
+        fields[i].field.fieldPhaseID = i + 1;
+        fields[i].data.assign(static_cast<size_t>(vp.fieldWidth) * vp.fieldHeight, 0);
+    }
+    std::vector<chd::output::ComponentFrame> frames(1);
+    try {
+        decoder.decodeFrames(fields, 0, 2, frames);
+    } catch (const std::runtime_error &) {
+        return true;
+    }
+    return false;
+}
+
+// Every run site: the matching shape decodes, each wrong dimension is refused.
+template <typename DecoderT>
+int checkOutputValidation() {
+    using Mode = chd::decoders::ldzeug::LdzeugDecoderBase::Mode;
+    for (const Mode mode : { Mode::Field, Mode::Frame }) {
+        // A stale program can return the other mode's height (263 or 526).
+        const int64_t otherModeHeight = (mode == Mode::Field) ? 526 : 263;
+        REQUIRE(!decodeThrows<DecoderT>(mode, {}));
+        REQUIRE(decodeThrows<DecoderT>(mode, { otherModeHeight, -1, false }));
+        REQUIRE(decodeThrows<DecoderT>(mode, { 240, -1, false }));
+        REQUIRE(decodeThrows<DecoderT>(mode, { -1, 1135, false }));
+        REQUIRE(decodeThrows<DecoderT>(mode, { -1, -1, true }));
+    }
+    return 0;
+}
+
+int testOutputShapeValidated() {
+    using namespace chd::decoders::ldzeug;
+    if (checkOutputValidation<LdzeugColorCnnDecoder>() != 0) return 1;
+    return checkOutputValidation<LdzeugLumaSepDecoder>();
+}
+
+int testBuiltinMIGraphXCacheDir() {
+    chd::nn::EngineCacheConfig cache;
+
+    cache.dir = "/cache/default";
+    cache.dirIsLibraryDefault = true;
+    REQUIRE(chd::nn::builtinMIGraphXCacheDir(cache).empty());
+
+    cache.dir = "/cache/910x263";
+    cache.dirIsLibraryDefault = false;
+    REQUIRE(chd::nn::builtinMIGraphXCacheDir(cache) == "/cache/910x263");
+
+    cache.dir.clear();
+    REQUIRE(chd::nn::builtinMIGraphXCacheDir(cache).empty());
+    return 0;
+}
+
 #endif  // CHD_TEST_NO_ONNXRUNTIME
 
 }  // namespace
@@ -233,6 +348,8 @@ int main() {
     rc |= testRejectsNonNtsc();
     rc |= testColorCnnConfigure();
     rc |= testLumaSepConfigure();
+    rc |= testOutputShapeValidated();
+    rc |= testBuiltinMIGraphXCacheDir();
     // Tear down the Ort::Env explicitly before C++ static destruction
     // (avoids the static-destruction-order hazard).
     chd_shutdown();

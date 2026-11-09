@@ -1696,8 +1696,18 @@ MIGraphX binaries), which otherwise recompile on the first inference (a
   benchmarking).
 - *path*: use this absolute directory (created if it doesn't exist).
 
-Honoured by the TensorRT and MIGraphX EPs; the CUDA EP uses its own internal
+Honored by the TensorRT and MIGraphX EPs; the CUDA EP uses its own internal
 PTX cache that is not configurable here.
+
+The MIGraphX EP built into ONNX Runtime reuses a program compiled for one input
+shape on any other shape of the same model, even after a restart. On that EP:
+
+- `NULL` means no cache, so every load recompiles.
+- A *path* has to be unique to one input shape, meaning the frame size for
+  ldzeug2 and the tile batch size for nnTransform3D. Include the dimensions in
+  the path, and keep other shapes off the loaded model.
+
+The MIGraphX plugin EP is not affected and takes any of these values.
 
 !!! note "Why threads default to 1"
     The decoder pool already parallelises across frames; raising the intra-op

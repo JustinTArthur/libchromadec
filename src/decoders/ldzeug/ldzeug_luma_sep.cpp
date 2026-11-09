@@ -229,9 +229,7 @@ void LdzeugLumaSepDecoder::decodeFrames(
             input.data  = frameBuffer.data();
             input.shape = { 1, 1, frameHeight, fieldWidth };
             auto outputs = session_->run({ input });
-            if (outputs->count() == 0) {
-                throw std::runtime_error("ldzeug2_luma_sep: inference produced no outputs");
-            }
+            requireOutputShape(*outputs, "ldzeug2_luma_sep", 1, frameHeight, fieldWidth);
             const float *yOut = outputs->data(0);
 
             // Per-line demod: cvbs row from the source field, Y row from
@@ -266,9 +264,7 @@ void LdzeugLumaSepDecoder::decodeFrames(
                 input.data  = fieldBuffer.data();
                 input.shape = { 1, 1, fieldHeight, fieldWidth };
                 auto outputs = session_->run({ input });
-                if (outputs->count() == 0) {
-                    throw std::runtime_error("ldzeug2_luma_sep: inference produced no outputs");
-                }
+                requireOutputShape(*outputs, "ldzeug2_luma_sep", 1, fieldHeight, fieldWidth);
                 const float *yOut = outputs->data(0);
                 for (int32_t y = 0; y < fieldHeight; ++y) {
                     const int32_t frameLine = y * 2 + yOffset;

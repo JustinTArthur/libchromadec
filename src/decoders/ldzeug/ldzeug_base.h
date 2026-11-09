@@ -27,7 +27,7 @@
 #include "../decoder_base.h"
 #include "../source_field.h"
 
-namespace chd::nn { class InferenceEngine; }
+namespace chd::nn { class InferenceEngine; class RunResult; }
 
 namespace chd::decoders::ldzeug {
 
@@ -63,6 +63,12 @@ public:
     bool phaseCompensation() const { return phaseCompensation_; }
 
 protected:
+    // Throw unless the first output is an [N, channels, height, width] tensor.
+    // Every row read from an output is indexed with the requested dimensions,
+    // so a mismatch would scramble the picture or overrun the buffer.
+    static void requireOutputShape(const chd::nn::RunResult &result, const char *decoderName,
+                                   int64_t channels, int64_t height, int64_t width);
+
     chd::metadata::LdDecodeMetaData::VideoParameters videoParameters{};
     std::shared_ptr<chd::nn::InferenceEngine>        session_;
     Mode                                             mode_ = Mode::Field;

@@ -95,13 +95,7 @@ void LdzeugColorCnnDecoder::decodeFrames(
         input.data  = inputBuffer.data();
         input.shape = { 1, 3, modelHeight, fieldWidth };
         auto result = session_->run({ input });
-        if (result->count() == 0) {
-            throw std::runtime_error("ldzeug2_color_cnn: inference produced no outputs");
-        }
-        const auto outShape = result->shape(0);
-        if (outShape.size() != 4 || outShape[1] != 3) {
-            throw std::runtime_error("ldzeug2_color_cnn: unexpected output tensor shape");
-        }
+        requireOutputShape(*result, "ldzeug2_color_cnn", 3, modelHeight, fieldWidth);
         return result;
     };
 

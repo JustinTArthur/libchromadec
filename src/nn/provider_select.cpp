@@ -487,6 +487,11 @@ bool attachTensorRT(Ort::SessionOptions &options,
     return true;
 }
 
+std::string builtinMIGraphXCacheDir(const EngineCacheConfig &cache)
+{
+    return cache.dirIsLibraryDefault ? std::string() : cache.dir;
+}
+
 // ─── MIGraphX attach (Linux / AMD) ───────────────────────────────────────
 // Two forms. The plugin EP (ROCm 10 on) is used when the caller named its
 // library, or when ONNX Runtime has no built-in MIGraphX and the plugin is
@@ -538,7 +543,8 @@ bool attachMIGraphX(Ort::SessionOptions &options,
     try {
         std::unordered_map<std::string, std::string> mxOpts;
         mxOpts["device_id"] = std::to_string(config.deviceId);
-        if (!cache.dir.empty()) {
+        const std::string builtinCacheDir = builtinMIGraphXCacheDir(cache);
+        if (!builtinCacheDir.empty()) {
             // migraphx_model_cache_dir is recognised by newer ORT MIGraphX
             // EPs as a directory that the provider manages files inside.
             // Older ORT builds reject unknown option keys, so we only set
@@ -549,7 +555,11 @@ bool attachMIGraphX(Ort::SessionOptions &options,
             // reject this key, fall back to leaving cache.dir unused on
             // MIGraphX (TensorRT will still be cached via its own option
             // path).
-            mxOpts["migraphx_model_cache_dir"] = cache.dir;
+            mxOpts["migraphx_model_cache_dir"] = builtinCacheDir;
+        } else if (cache.dirIsLibraryDefault) {
+            chd::log::info() << "chd_nn: built-in MIGraphX compiles without a cache; "
+                                "set engine_cache_dir to a directory unique to the input shape "
+                                "to keep one";
         }
         options.AppendExecutionProvider("MIGraphX", mxOpts);
         chd::log::info() << "chd_nn: attached MIGraphX through the built-in EP";

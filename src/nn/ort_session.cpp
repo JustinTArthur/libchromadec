@@ -96,6 +96,7 @@ Ort::SessionOptions OrtSession::prepareSessionOptions(const SessionOptions &opts
     AttachConfig config;
     config.cache.dir       = resolveEngineCacheDir(opts);
     config.cache.modelPath = cacheModelPath;
+    config.cache.dirIsLibraryDefault = !opts.engineCacheDir.has_value();
     config.precision       = opts.precision;
     config.deviceId        = opts.deviceId;
 

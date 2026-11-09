@@ -58,6 +58,9 @@ using ProviderPreference = chd_nn_backend_t;
 struct EngineCacheConfig {
     std::string dir;
     std::string modelPath;
+    // True when `dir` is the library's own per-user default rather than a
+    // directory the caller named.
+    bool dirIsLibraryDefault = false;
 };
 
 // Per-session inputs to the attach helpers. `precision` is read by EPs with
@@ -110,6 +113,12 @@ bool attachTensorRT(Ort::SessionOptions &options,
 bool attachMIGraphX(Ort::SessionOptions &options,
                     const AttachConfig &config,
                     std::string *outError);
+
+// The cache directory for ONNX Runtime's built-in MIGraphX EP, or empty for no
+// cache. That EP leaves the input shape out of its cache file names, so a
+// variable-shape model reuses whichever program was compiled first. Only a
+// caller-named directory, which the caller keeps to one shape, is safe.
+std::string builtinMIGraphXCacheDir(const EngineCacheConfig &cache);
 
 // Pin the dlopen'd libraries of the execution provider a session actually
 // attached (CUDA, TensorRT, or MIGraphX — the ones ORT loads dynamically and

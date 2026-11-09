@@ -79,8 +79,9 @@ CoreML EP (`CHD_NN_ORT_COREML`).
     CoreML** backend below instead of an ONNX Runtime backend.
 
 For TensorRT and MIGraphX, set `engine_cache_dir` to avoid recompiling the
-engine on every load (the first compile costs 15-30 s). See
-[session options](api-reference.md#session-options).
+engine on every load (the first compile costs 15-30 s). The MIGraphX EP built
+into ONNX Runtime needs a directory unique to one input shape, and has no cache
+without one. See [session options](api-reference.md#session-options).
 
 `device_id` selects the GPU for the CUDA, TensorRT, MIGraphX and DirectML
 providers; nnTransform3D's device-resident FFT pipelines follow the session's
