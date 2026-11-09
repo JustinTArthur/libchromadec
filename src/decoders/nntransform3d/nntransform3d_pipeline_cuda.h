@@ -37,11 +37,9 @@ namespace chd::decoders::nntransform3d {
 //
 // `current{AccChroma,WeightSum}` are the overlap-add accumulators for
 // frame N; `next{AccChroma,WeightSum}` are for frame N+1. Both are
-// passed by reference and contain accumulated contributions from any
-// previous split3DnnTransform call (since each frame is referenced as
-// "next" then "current" across consecutive iterations). On return, all
-// four are updated with this call's contributions and brought back to
-// host memory.
+// passed by reference and start zeroed, because each tile pass is kept
+// separate until the frame is finalized. On return, all four hold this
+// call's contributions, brought back to host memory.
 //
 // `session` must have been built with the CUDA or TensorRT execution
 // provider attached. `runMutex` serialises concurrent IoBinding Run()

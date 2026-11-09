@@ -74,6 +74,11 @@ void NtscDecoder::setNnModel(std::shared_ptr<chd::nn::InferenceEngine> engine)
 {
     comb.setNnModel(std::move(engine));
 }
+
+void NtscDecoder::setTilePassCache(std::shared_ptr<Comb::TilePassCache> cache)
+{
+    comb.setTilePassCache(std::move(cache));
+}
 #endif
 
 }  // namespace chd::decoders::comb

@@ -151,6 +151,7 @@ impl Video {
     }
 
     /// Adds an extra composite source for multi-source dropout correction.
+    /// Fails once a decode has run with correction on.
     pub fn add_extra_source_composite(
         &mut self,
         path: impl AsRef<Path>,
@@ -168,6 +169,7 @@ impl Video {
     }
 
     /// Adds an extra Y/C-pair source for multi-source dropout correction.
+    /// Fails once a decode has run with correction on.
     pub fn add_extra_source_yc(
         &mut self,
         luma_path: impl AsRef<Path>,

@@ -90,6 +90,11 @@ test_secam_decoder = executable('test_secam_decoder',
 # it runs several times longer than the 30s meson default and was timing out.
 test('secam_decoder', test_secam_decoder, timeout: 300)
 
+test_single_flight_cache = executable('test_single_flight_cache',
+  'unit/test_single_flight_cache.cpp',
+  dependencies: chromadec_internal_dep)
+test('single_flight_cache', test_single_flight_cache, timeout: 60)
+
 # Concurrent FFTW planning from every site in the library.
 test_fftw_planner_threads = executable('test_fftw_planner_threads',
   'unit/test_fftw_planner_threads.cpp',

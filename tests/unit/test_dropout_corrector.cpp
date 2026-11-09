@@ -333,7 +333,36 @@ int testCvbsDropoutsWrongVersionRejected() {
 
 }  // namespace
 
+// The second field of subcarrier-locked PAL moves left, and its dropout
+// positions have to move with the samples.
+int testSecondFieldShiftMovesDropouts() {
+    using chd::decoders::SourceField;
+    chd::metadata::LdDecodeMetaData::VideoParameters vp;
+    vp.system = chd::metadata::PAL;
+    vp.isSubcarrierLocked = true;
+    if (!SourceField::secondFieldIsShifted(vp)) return 1;
+    vp.isSubcarrierLocked = false;
+    if (SourceField::secondFieldIsShifted(vp)) return 1;
+    vp.system = chd::metadata::NTSC;
+    vp.isSubcarrierLocked = true;
+    if (SourceField::secondFieldIsShifted(vp)) return 1;
+
+    chd::reader::Data data{1, 2, 3, 4, 5, 6};
+    chd::metadata::DropOuts dropOuts;
+    dropOuts.append(1, 4, 10);
+    dropOuts.append(0, 2, 11);  // entirely in the samples that leave the field
+    dropOuts.append(5, 8, 12);
+    SourceField::shiftSecondField(data, dropOuts, 9);
+
+    if (data != chd::reader::Data{3, 4, 5, 6, 9, 9}) return 1;
+    if (dropOuts.size() != 2) return 1;
+    if (dropOuts.startx(0) != 0 || dropOuts.endx(0) != 2 || dropOuts.fieldLine(0) != 10) return 1;
+    if (dropOuts.startx(1) != 3 || dropOuts.endx(1) != 6 || dropOuts.fieldLine(1) != 12) return 1;
+    return 0;
+}
+
 int main() {
+    if (testSecondFieldShiftMovesDropouts()) return 1;
     if (testSingleSourceCorrection()) return 1;
     if (testIntraFieldFallback()) return 1;
     if (testNoDropoutsIsNoOp()) return 1;

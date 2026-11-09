@@ -27,6 +27,7 @@
 #define CHD_DECODERS_SOURCE_FIELD_H
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "../metadata/core.h"
@@ -41,6 +42,25 @@ struct SourceField {
 
     // Black placeholder for a frame outside the input.
     bool isPadding = false;
+
+    // 1-based number of this field in the source, as loaded.
+    int32_t fieldNumber = 0;
+
+    // Which version of this field's samples `data` holds, for matching work
+    // between decode calls. Empty if they can't be matched.
+    std::optional<uint64_t> inputRevision;
+
+    // Set inputRevision across a window of frames from loadFields. While
+    // correction is on, `correctionRevision` identifies it, and a frame with
+    // dropouts takes that value because its samples depend on the correction.
+    // Other frames hold the source's own samples, which are revision 0.
+    static void markInputRevisions(std::vector<SourceField> &fields, std::optional<uint64_t> correctionRevision);
+
+    // With subcarrier-locked 4fSC PAL sampling, the two fields of a frame are
+    // horizontally misaligned by two samples, so the second moves left to
+    // compensate. Its dropout positions move with it.
+    static bool secondFieldIsShifted(const chd::metadata::LdDecodeMetaData::VideoParameters &videoParameters);
+    static void shiftSecondField(chd::reader::Data &data, chd::metadata::DropOuts &dropOuts, uint16_t black);
 
     // Load a sequence of frames from the input files.
     //

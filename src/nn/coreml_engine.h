@@ -13,6 +13,8 @@
 #ifndef CHD_NN_COREML_ENGINE_H
 #define CHD_NN_COREML_ENGINE_H
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,6 +51,7 @@ public:
         const std::vector<std::string> &outputNames) override;
 
     chd_nn_backend_t activeBackend() const override { return CHD_NN_COREML; }
+    uint64_t outputGeneration() const override { return outputGeneration_.load(std::memory_order_acquire); }
     const std::vector<std::string> &inputNames()  const override { return inputNames_; }
     const std::vector<std::string> &outputNames() const override { return outputNames_; }
 
@@ -71,6 +74,7 @@ private:
     std::vector<std::string> inputNames_;
     std::vector<std::string> outputNames_;
     CoreMLComputeUnits       units_;
+    std::atomic<uint64_t>    outputGeneration_{0};
 };
 
 }  // namespace chd::nn

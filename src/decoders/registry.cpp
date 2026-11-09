@@ -351,6 +351,15 @@ bool applyNnModel(chd_decoder_kind_t kind,
     // Other kinds don't take a session; supplying one is a caller mistake.
     return false;
 }
+
+void applyTilePassCache(chd_decoder_kind_t kind,
+                        chd::decoders::Decoder &decoder,
+                        std::shared_ptr<chd::decoders::comb::Comb::TilePassCache> cache) {
+    if (kind != CHD_DEC_NN_TRANSFORM3D) return;
+    if (auto *nd = dynamic_cast<chd::decoders::comb::NtscDecoder *>(&decoder)) {
+        nd->setTilePassCache(std::move(cache));
+    }
+}
 #endif
 
 }  // namespace chd::decoders::registry

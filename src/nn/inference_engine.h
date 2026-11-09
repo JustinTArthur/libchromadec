@@ -62,6 +62,11 @@ public:
     // The backend actually in use (after fallback).
     virtual chd_nn_backend_t activeBackend() const = 0;
 
+    // Changes whenever this engine starts producing numerically different
+    // output for the same input, so results from before aren't mixed with
+    // results from after.
+    virtual uint64_t outputGeneration() const { return 0; }
+
     // Graph input / output names in declared order.
     virtual const std::vector<std::string> &inputNames()  const = 0;
     virtual const std::vector<std::string> &outputNames() const = 0;

@@ -28,6 +28,7 @@ chd_status_t chd_decoder_set_dropout(chd_decoder_t *d, const chd_dropout_opts_t 
     }
     d->dropoutOpts = *opts;
     d->dropoutOptsSet = true;
+    d->dropoutRevision.fetch_add(1, std::memory_order_release);
     return CHD_OK;
 }
 

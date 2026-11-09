@@ -25,10 +25,45 @@
 
 #include "source_field.h"
 
+#include <algorithm>
+
 #include "../common/log.h"
 #include "../reader/source.h"
 
 namespace chd::decoders {
+
+void SourceField::markInputRevisions(std::vector<SourceField> &fields, std::optional<uint64_t> correctionRevision)
+{
+    for (size_t i = 0; i + 1 < fields.size(); i += 2) {
+        const bool hasDropouts = !(fields[i].field.dropOuts.empty() && fields[i + 1].field.dropOuts.empty());
+        const uint64_t revision = (correctionRevision && hasDropouts) ? *correctionRevision : 0;
+        fields[i].inputRevision = revision;
+        fields[i + 1].inputRevision = revision;
+    }
+}
+
+bool SourceField::secondFieldIsShifted(const chd::metadata::LdDecodeMetaData::VideoParameters &videoParameters)
+{
+    return (videoParameters.system == chd::metadata::PAL || videoParameters.system == chd::metadata::PAL_M)
+           && videoParameters.isSubcarrierLocked;
+}
+
+void SourceField::shiftSecondField(chd::reader::Data &data, chd::metadata::DropOuts &dropOuts, uint16_t black)
+{
+    // XXX This should be done elsewhere, as it affects other tools too.
+    data.erase(data.begin(), data.begin() + 2);
+    for (int j = 0; j < 2; j++) {
+        data.push_back(black);
+    }
+
+    chd::metadata::DropOuts shifted;
+    shifted.reserve(dropOuts.size());
+    for (int32_t i = 0; i < dropOuts.size(); i++) {
+        const int32_t endx = dropOuts.endx(i) - 2;
+        if (endx > 0) shifted.append(std::max(dropOuts.startx(i) - 2, 0), endx, dropOuts.fieldLine(i));
+    }
+    dropOuts = shifted;
+}
 
 void SourceField::loadFields(chd::reader::ISource &sourceVideo, chd::metadata::LdDecodeMetaData &ldDecodeMetaData,
                              bool firstFieldFirst, int32_t firstFrameNumber, int32_t numFrames,
@@ -114,6 +149,8 @@ void SourceField::loadFields(chd::reader::ISource &sourceVideo, chd::metadata::L
 
         fields[i].isPadding = useBlankFrame;
         fields[i + 1].isPadding = useBlankFrame;
+        fields[i].fieldNumber = firstFieldNumber;
+        fields[i + 1].fieldNumber = secondFieldNumber;
 
         if (useBlankFrame) {
             // Fill both fields with black
@@ -124,19 +161,8 @@ void SourceField::loadFields(chd::reader::ISource &sourceVideo, chd::metadata::L
             fields[i].data = sourceVideo.getVideoField(firstFieldNumber);
             fields[i + 1].data = sourceVideo.getVideoField(secondFieldNumber);
 
-            if ((videoParameters.system == chd::metadata::PAL || videoParameters.system == chd::metadata::PAL_M) && videoParameters.isSubcarrierLocked) {
-                // With subcarrier-locked 4fSC PAL sampling, we have four
-                // "extra" samples over the course of the frame, so the two
-                // fields will be horizontally misaligned by two samples. Shift
-                // the second field to the left to compensate.
-                //
-                // XXX This should be done elsewhere, as it affects other tools
-                // too.
-
-                fields[i + 1].data.erase(fields[i + 1].data.begin(), fields[i + 1].data.begin() + 2);
-                for (int j = 0; j < 2; j++) {
-                    fields[i + 1].data.push_back(black);
-                }
+            if (secondFieldIsShifted(videoParameters)) {
+                shiftSecondField(fields[i + 1].data, fields[i + 1].field.dropOuts, black);
             }
         }
 

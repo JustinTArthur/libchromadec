@@ -493,6 +493,123 @@ int testMultiSourceDropoutAbi(const fs::path &dir) {
     return 0;
 }
 
+std::vector<uint16_t> decodedPlanes(chd_decoder_t *dec, int64_t frameIndex) {
+    std::vector<uint16_t> samples;
+    chd_frame_t *frame = nullptr;
+    if (chd_decode_frame(dec, frameIndex, &frame) != CHD_OK) return samples;
+    for (const chd_plane_t plane : {CHD_PLANE_Y, CHD_PLANE_CB, CHD_PLANE_CR}) {
+        chd_plane_info_t info{};
+        const void *data = nullptr;
+        ptrdiff_t stride = 0;
+        if (chd_frame_get_plane_info(frame, plane, &info) != CHD_OK) break;
+        if (chd_frame_get_plane(frame, plane, &data, &stride) != CHD_OK) break;
+        for (int32_t row = 0; row < info.height; row++) {
+            const auto *line = reinterpret_cast<const uint16_t *>(static_cast<const char *>(data) + row * stride);
+            samples.insert(samples.end(), line, line + info.width);
+        }
+    }
+    chd_frame_free(frame);
+    return samples;
+}
+
+// A dropout in a look-around frame must be corrected before a 3D decoder reads
+// it, while the counters keep describing only the frame being decoded.
+int testCorrectionCoversLookAroundFrames(const fs::path &dir) {
+    const std::string cleanTbc = (dir / "win_clean.tbc").string();
+    const std::string cleanDb  = (dir / "win_clean.tbc.db").string();
+    const std::string dirtyTbc = (dir / "win_dirty.tbc").string();
+    const std::string dirtyDb  = (dir / "win_dirty.tbc.db").string();
+    const std::string extraTbc = (dir / "win_extra.tbc").string();
+    const std::string extraDb  = (dir / "win_extra.tbc.db").string();
+
+    constexpr int32_t fieldWidth  = 910;
+    constexpr int32_t fieldHeight = 263;
+    constexpr int32_t numFields   = 8;
+    constexpr int32_t dirtyField  = 4;  // first field of frame index 2
+    constexpr int32_t startx = 200, endx = 280, fieldLine = 100;
+
+    REQUIRE(writeBlackTbc(cleanTbc, fieldWidth, fieldHeight, numFields));
+    REQUIRE(writeBlackTbc(dirtyTbc, fieldWidth, fieldHeight, numFields));
+    REQUIRE(writeBlackTbc(extraTbc, fieldWidth, fieldHeight, numFields));
+    REQUIRE(writeTbcSidecar(cleanDb, numFields));
+    REQUIRE(writeTbcSidecar(extraDb, numFields));
+    REQUIRE(writeTbcSidecar(dirtyDb, numFields, {DropoutRow{dirtyField, startx, endx, fieldLine}}));
+    {
+        std::fstream f(dirtyTbc, std::ios::binary | std::ios::in | std::ios::out);
+        REQUIRE(f.good());
+        const std::vector<uint16_t> spike(static_cast<size_t>(endx - startx), 60000);
+        const std::streamoff row = (static_cast<std::streamoff>(dirtyField) * fieldHeight) + (fieldLine - 1);
+        f.seekp(((row * fieldWidth) + startx) * 2);
+        f.write(reinterpret_cast<const char *>(spike.data()), static_cast<std::streamsize>(spike.size() * 2));
+    }
+
+    const auto openDecoder = [](const std::string &tbc, const std::string &db, chd_video_t **video,
+                                chd_decoder_t **dec, int enabled) {
+        chd_dropout_opts_t dops{};
+        dops.enabled = enabled;
+        return chd_video_open_composite(tbc.c_str(), db.c_str(), nullptr, video) == CHD_OK
+            && chd_decoder_create(*video, CHD_DEC_NTSC_3D_NO_ADAPT, dec) == CHD_OK
+            && chd_decoder_set_option_i32(*dec, CHD_OPT_PADDING_MULTIPLE, 1) == CHD_OK
+            && chd_decoder_set_option_str(*dec, CHD_OPT_OUTPUT_FORMAT, "yuv444p16") == CHD_OK
+            && chd_decoder_set_dropout(*dec, &dops) == CHD_OK
+            && chd_decoder_commit(*dec) == CHD_OK;
+    };
+
+    chd_video_t *cleanVideo = nullptr;
+    chd_decoder_t *cleanDec = nullptr;
+    REQUIRE(openDecoder(cleanTbc, cleanDb, &cleanVideo, &cleanDec, 0));
+    const auto cleanNeighbour = decodedPlanes(cleanDec, 3);
+    const auto cleanTarget = decodedPlanes(cleanDec, 2);
+    REQUIRE(!cleanNeighbour.empty());
+    REQUIRE(!cleanTarget.empty());
+    chd_decoder_free(cleanDec);
+    chd_video_free(cleanVideo);
+
+    // Without correction the spike reaches the frame after it, which this
+    // decoder combs against its previous frame.
+    chd_video_t *video = nullptr;
+    chd_decoder_t *dec = nullptr;
+    REQUIRE(openDecoder(dirtyTbc, dirtyDb, &video, &dec, 0));
+    const auto uncorrectedNeighbour = decodedPlanes(dec, 3);
+    REQUIRE(!uncorrectedNeighbour.empty());
+    REQUIRE(uncorrectedNeighbour != cleanNeighbour);
+
+    // Extra sources are still accepted, because correction hasn't been on.
+    REQUIRE(chd_video_add_extra_source_composite(video, extraTbc.c_str(), extraDb.c_str()) == CHD_OK);
+    chd_decoder_free(dec);
+    chd_video_free(video);
+
+    REQUIRE(openDecoder(dirtyTbc, dirtyDb, &video, &dec, 1));
+
+    // The dirty frame is a neighbour here, so it's corrected but not counted.
+    chd_dropout_stats_t stats{};
+    REQUIRE(decodedPlanes(dec, 3) == cleanNeighbour);
+    REQUIRE(chd_decoder_get_last_dropout_stats(dec, &stats) == CHD_OK);
+    REQUIRE(stats.corrected == 0);
+
+    // Now it's the target, and its counters survive coming from the cache.
+    REQUIRE(decodedPlanes(dec, 2) == cleanTarget);
+    REQUIRE(chd_decoder_get_last_dropout_stats(dec, &stats) == CHD_OK);
+    REQUIRE(stats.corrected == 1);
+
+    REQUIRE(chd_video_add_extra_source_composite(video, extraTbc.c_str(), extraDb.c_str()) != CHD_OK);
+
+    // Options changed between calls apply at once, in either direction.
+    chd_dropout_opts_t dops{};
+    REQUIRE(chd_decoder_set_dropout(dec, &dops) == CHD_OK);
+    const auto uncorrectedTarget = decodedPlanes(dec, 2);
+    REQUIRE(!uncorrectedTarget.empty());
+    REQUIRE(uncorrectedTarget != cleanTarget);
+    dops.enabled = 1;
+    REQUIRE(chd_decoder_set_dropout(dec, &dops) == CHD_OK);
+    REQUIRE(decodedPlanes(dec, 2) == cleanTarget);
+
+    chd_decoder_free(dec);
+    chd_video_free(video);
+    for (const auto &path : {cleanTbc, cleanDb, dirtyTbc, dirtyDb, extraTbc, extraDb}) fs::remove(path);
+    return 0;
+}
+
 // ─── Test 4 (hardening follow-up): parallel async dispatch. ────────────────
 //
 // thread_count=4, 12 indices. Each worker owns its own decoder instance,
@@ -1832,6 +1949,7 @@ int main() {
     if (int rc = testSyncDecodeBlackMono(dir);    rc != 0) return rc;
     if (int rc = testCvbsPrimaryWithTbcExtra(dir); rc != 0) return rc;
     if (int rc = testMultiSourceDropoutAbi(dir);  rc != 0) return rc;
+    if (int rc = testCorrectionCoversLookAroundFrames(dir); rc != 0) return rc;
     if (int rc = testParallelAsyncDispatch(dir);  rc != 0) return rc;
     if (int rc = testReverseFieldOrder(dir);          rc != 0) return rc;
     if (int rc = testActiveLineSidecarOverride(dir);  rc != 0) return rc;

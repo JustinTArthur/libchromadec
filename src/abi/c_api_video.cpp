@@ -861,6 +861,9 @@ chd_status_t chd_video_add_extra_source_composite(chd_video_t *v, const char *pa
     if (v == nullptr || path == nullptr) {
         return set_error("chd_video_add_extra_source_composite: null argument");
     }
+    if (v->extraSourcesFrozen.load(std::memory_order_acquire)) {
+        return set_error("chd_video_add_extra_source_composite: a decode has already run with dropout correction on");
+    }
     return addCompositeExtra("chd_video_add_extra_source_composite",
                              v->extraSources, path, metadata_path_or_null);
 }
@@ -870,6 +873,9 @@ chd_status_t chd_video_add_extra_source_yc(chd_video_t *v, const char *luma_path
                                            const char *metadata_path_or_null) {
     if (v == nullptr || luma_path == nullptr || chroma_path == nullptr) {
         return set_error("chd_video_add_extra_source_yc: null argument");
+    }
+    if (v->extraSourcesFrozen.load(std::memory_order_acquire)) {
+        return set_error("chd_video_add_extra_source_yc: a decode has already run with dropout correction on");
     }
     if (!fs::exists(luma_path) || !fs::exists(chroma_path)) {
         return set_error("chd_video_add_extra_source_yc: luma/chroma file does not exist",

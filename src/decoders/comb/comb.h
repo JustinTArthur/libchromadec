@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <tuple>
 #include <vector>
 
 #include "../../metadata/core.h"
@@ -39,6 +40,7 @@
 #include "../../output/component_frame.h"
 #include "../../reader/source.h"
 #include "../../common/color_conversion.h"
+#include "../../common/single_flight_cache.h"
 #include "../decoder_base.h"
 #include "../source_field.h"
 
@@ -100,6 +102,50 @@ public:
     // the decoder will fall back to 2D chroma. Caller retains shared
     // ownership.
     void setNnModel(std::shared_ptr<chd::nn::InferenceEngine> engine);
+
+    // Overlap-add output of one nnTransform3D tile pass over a frame pair, for
+    // each frame of the pair. Every pass starts from zero, so a frame's chroma
+    // is the same two sums added once, however the passes were grouped into
+    // decode calls. Rows are frameHeight x fieldWidth.
+    struct TilePassResult {
+        struct FrameContribution {
+            std::vector<std::vector<double>> chroma;
+            std::vector<std::vector<double>> weight;
+        };
+        FrameContribution first;
+        FrameContribution second;
+    };
+
+    // Identifies the samples a tile pass reads from one frame. Field numbers
+    // are 1-based, so a value-initialised token is the padding frame.
+    struct FrameToken {
+        int32_t firstFieldNumber = 0;
+        int32_t secondFieldNumber = 0;
+        uint64_t inputRevision = 0;
+    };
+
+    struct TilePassKey {
+        FrameToken first;
+        FrameToken second;
+        uint64_t engineGeneration = 0;
+
+        bool operator<(const TilePassKey &other) const {
+            const auto tied = [](const TilePassKey &k) {
+                return std::tie(k.first.firstFieldNumber, k.first.secondFieldNumber, k.first.inputRevision,
+                                k.second.firstFieldNumber, k.second.secondFieldNumber, k.second.inputRevision,
+                                k.engineGeneration);
+            };
+            return tied(*this) < tied(other);
+        }
+    };
+
+    using TilePassCache = chd::SingleFlightCache<TilePassKey, TilePassResult>;
+
+    // Share tile passes between decode calls and worker threads. Scope a cache
+    // to instances with identical model, configuration and source, because the
+    // key covers only what varies from frame to frame. Without one, every pass
+    // is computed.
+    void setTilePassCache(std::shared_ptr<TilePassCache> cache);
 #endif
 
     // Decode a sequence of fields into a sequence of interlaced frames
@@ -126,6 +172,7 @@ private:
     // loop are serialised by nnRunMutex below to match tbc-tools.
     std::shared_ptr<chd::nn::InferenceEngine> nnSession;
     std::mutex nnRunMutex;
+    std::shared_ptr<TilePassCache> tilePassCache;
 #endif
 
     // An input frame in the process of being decoded
@@ -140,22 +187,20 @@ private:
         void split3D(const FrameBuffer &previousFrame, const FrameBuffer &nextFrame);
 
 #if defined(CHD_WITH_NN)
-        // Run the nnTransform3D 3D-FFT + CNN-mask + IFFT chroma extraction
-        // for this frame and its successor. Reads `rawbuffer` of `this` and
-        // `nextFrame`; accumulates into `this->nnAccChroma` and
-        // `this->nnWeightSum` (plus `nextFrame->nnAccChroma/Sum` for the
-        // overlapping tiles that span the frame boundary). Caller must
-        // call finalizeNnTransform3D() afterwards to normalise.
+        // Run one nnTransform3D tile pass (3D-FFT + CNN-mask + IFFT) over this
+        // frame and its successor, reading `rawbuffer` of both. Returns the
+        // pass's contribution to each frame, or nullptr if the pass failed and
+        // the frames it touches should fall back to 2D.
         //
-        // `session` is the shared Ort::Session; `runMutex` serialises
-        // concurrent Run() calls inside this method (matches tbc-tools).
-        // Returns true on success, false if the session became unusable
-        // mid-frame (in which case the caller should fall back to 2D).
-        bool split3DnnTransform(FrameBuffer &nextFrame,
-                                chd::nn::InferenceEngine &engine,
-                                std::mutex &runMutex,
-                                double inputMagnitudeScale);
-        void finalizeNnTransform3D();
+        // `runMutex` serialises concurrent inference calls inside the pass.
+        std::shared_ptr<const TilePassResult> runNnTilePass(FrameBuffer &nextFrame,
+                                                            chd::nn::InferenceEngine &engine,
+                                                            std::mutex &runMutex,
+                                                            double inputMagnitudeScale);
+        // Normalise the two passes overlapping this frame into clpbuffer[2],
+        // where `backwardPass` covers (previous, this) and `forwardPass` covers
+        // (this, next).
+        void finalizeNnTransform3D(const TilePassResult &backwardPass, const TilePassResult &forwardPass);
         void fallbackNnTransform3DTo2D();
 #endif
 
@@ -206,11 +251,16 @@ private:
         } clpbuffer[3];
 
 #if defined(CHD_WITH_NN)
-        // Per-pixel overlap-add accumulators for the nnTransform3D pass.
-        // Sized frameHeight × videoParameters.fieldWidth, lazily allocated
-        // on first split3DnnTransform call. After finalizeNnTransform3D
-        // the normalised chroma lands in clpbuffer[2] (the 3D-chroma
-        // slot) so splitIQ picks it up unchanged.
+        // Accumulates the tiles of one pass over `nextFrame`, into the
+        // accumulators below on both frames. They must start empty.
+        bool split3DnnTransform(FrameBuffer &nextFrame,
+                                chd::nn::InferenceEngine &engine,
+                                std::mutex &runMutex,
+                                double inputMagnitudeScale);
+
+        // Per-pixel overlap-add accumulators for the tile pass in progress.
+        // Sized frameHeight x videoParameters.fieldWidth, allocated when the
+        // pass starts and handed to its TilePassResult when it completes.
         std::vector<std::vector<double>> nnAccChroma;
         std::vector<std::vector<double>> nnWeightSum;
 #endif

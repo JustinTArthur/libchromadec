@@ -25,6 +25,7 @@
 
 #include "../decoders/decoder_base.h"
 #include "../decoders/registry.h"
+#include "../dropout/corrected_frame_cache.h"
 #include "../dropout/multi_source_alignment.h"
 #include "../metadata/core.h"
 #include "../output/output_writer.h"
@@ -65,6 +66,11 @@ struct chd_video {
     std::string primaryPath;
     bool metadataSynthesized = false;
     std::vector<chd_video_source> extraSources;
+
+    // Set by the first decode with correction on. Frames corrected so far
+    // and the multi-source alignment depend on the extras, so none can be
+    // added after that.
+    std::atomic<bool> extraSourcesFrozen{false};
 
     // Decode-level Y/C merge: when non-null, `source` carries luma and this
     // carries the separately-decoded chroma plane (a luma + chroma .tbc pair,
@@ -172,6 +178,19 @@ struct chd_decoder {
     // Same, for the chroma plane's extra sources in a Y/C merge.
     std::unique_ptr<chd::dropout::MultiSourceAlignment> chromaMultiSourceAlignment;
     std::once_flag chromaMultiSourceAlignmentOnce;
+
+    // Corrected frames shared by every worker, one cache per decoded plane.
+    // The revision changes with the dropout options, so frames corrected
+    // under earlier options are never reused.
+    std::atomic<uint64_t> dropoutRevision{1};
+    std::shared_ptr<chd::dropout::CorrectedFrameCache> correctedFrameCache;
+    std::shared_ptr<chd::dropout::CorrectedFrameCache> chromaCorrectedFrameCache;
+
+#if defined(CHD_WITH_NN)
+    // nnTransform3D tile passes shared by every worker of this decoder.
+    // Null for other kinds.
+    std::shared_ptr<chd::decoders::comb::Comb::TilePassCache> tilePassCache;
+#endif
 
     // Protects lastDropoutStats updates + reads. Small fast path —
     // worker takes it after the decode body to publish the stats.

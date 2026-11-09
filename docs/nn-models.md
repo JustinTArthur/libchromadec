@@ -250,17 +250,18 @@ distinguishes them at runtime.
       `Range`/`ScatterND`/`Expand` ops don't re-derive under a resized input.
 
 **Performance** (one M-series GPU). Two views: the full decoder pipeline and the
-NN inference in isolation. Both are **single-threaded** — in production the
-[`DecoderPool`](api-reference.md) runs frames across all cores (inter-frame
-parallelism), which speeds the CPU paths up roughly by the core count and
-narrows the gaps below. Native-backend frames match the ONNX Runtime CPU path to
+NN inference in isolation. Both are **single-threaded**.
+[`chd_decode_frames_async`](api-reference.md#chd_decode_frames_async) with
+`CHD_OPT_THREAD_COUNT` runs frames across all cores (inter-frame parallelism),
+which speeds the CPU paths up roughly by the core count and narrows the gaps
+below. Native-backend frames match the ONNX Runtime CPU path to
 **≤ 1 LSB out of 65535** (rel-RMS ≈ 1e-6) for every model.
 
 Full pipeline, per frame (I/O → demod → NN → YUV):
 
 | model | native CoreML | ORT CPU (1 thread) | ORT CoreML EP |
 |---|---|---|---|
-| nnTransform3D `chroma_net` | ≈ 1.56 s | ≈ 51 s | ≈ 55 s |
+| nnTransform3D `chroma_net` | ≈ 0.78 s | ≈ 26 s | ≈ 27 s |
 | ldzeug2 `color_cnn` (field) | ≈ 18 ms | ≈ 1.5 s | ≈ 157 ms |
 | ldzeug2 `luma_sep` (field) | ≈ 42 ms | ≈ 5.9 s | ≈ 314 ms |
 
@@ -268,9 +269,12 @@ Full pipeline, per frame (I/O → demod → NN → YUV):
 doesn't help nnTransform3D — it runs the 3D conv on CPU anyway and adds
 partition overhead, landing slightly *slower* than plain CPU.
 
+The nnTransform3D figures are for decoding consecutive frames; see
+[tile-pass reuse](#tile-pass-reuse).
+
 For `chroma_net` v2, an **fp16 package with `CHD_NN_COREML_ALL`** moves the
 convolution to the ANE and is the fastest macOS configuration measured — with
-the default FFTW FFT, ≈ 1.04 s/frame vs ≈ 1.56 s for the fp32/GPU package on
+the default FFTW FFT, ≈ 0.52 s/frame vs ≈ 0.78 s for the fp32/GPU package on
 one M4 Max (chips differ: the ANE-to-GPU ratio varies by generation, so
 benchmark per machine, e.g. `examples/nn_benchmark -b coreml_native -M
 chroma_net_fp16.mlpackage -s 128 -u all`). On the **GPU**, fp16 is slightly
@@ -299,8 +303,8 @@ mask Metal kernels, and a `cpuAndGPU` CoreML convolution (written in place via
 `outputBackings`), avoiding the per-tile host round-trip. It falls back to the
 FFTW FFT on older macOS, when no Metal device is present, or on any
 setup/runtime failure. In practice it's **not worth enabling**: the run is
-conv-bound (the FFT is ~50 ms of the ~770 ms frame), so Layer 2 measured within
-1% of the FFTW default while running the FFT at lower precision (f32 vs f64).
+conv-bound (the FFT is ~20 ms of the ~780 ms frame), so Layer 2 measured within
+about 1% of the FFTW default while running the FFT at lower precision (f32 vs f64).
 Do **not** combine it with `CHD_NN_COREML_ALL` and an fp16 package: a conv
 scheduled on the ANE has to sync/copy out of the Metal-resident buffers every
 chunk, and the combination measures slower than the plain FFTW path (the
@@ -330,6 +334,15 @@ The ONNX graph (opset 11; `Conv` / `LeakyRelu` / `Add` / `Sigmoid`) is:
 nnTransform3D's tiles sit on a lattice anchored to the source's picture, not to
 the active crop, so tightening a crop only trims the output. Tiles read the
 source's picture window, plus any crop you set outside it.
+
+### Tile-pass reuse
+
+A frame needs two tile passes, (N-1,N) and (N,N+1), and each decoder keeps recent
+passes for its workers to share, so decoding in either direction runs about one
+pass per frame. On ORT CPU, native CoreML, CUDA and HIP that measured about half
+the time of computing both passes for every frame. The first frame after a seek
+still runs both. The decoder keeps two more passes than the most workers it has
+used, at about 15 MB each for NTSC.
 
 ### Model series and the magnitude scale
 

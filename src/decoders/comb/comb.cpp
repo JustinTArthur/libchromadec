@@ -176,6 +176,11 @@ void Comb::setNnModel(std::shared_ptr<chd::nn::InferenceEngine> engine)
 {
     nnSession = std::move(engine);
 }
+
+void Comb::setTilePassCache(std::shared_ptr<TilePassCache> cache)
+{
+    tilePassCache = std::move(cache);
+}
 #endif
 
 void Comb::decodeFrames(const std::vector<chd::decoders::SourceField> &inputFields, int32_t startIndex, int32_t endIndex,
@@ -201,42 +206,75 @@ void Comb::decodeFrames(const std::vector<chd::decoders::SourceField> &inputFiel
             const int32_t fieldIndex = startIndex + (frameIndex * 2);
             if (fieldIndex >= 0 && (fieldIndex + 1) < static_cast<int32_t>(inputFields.size())) {
                 frameBuffer->loadFields(inputFields[fieldIndex], inputFields[fieldIndex + 1]);
-                frameBuffer->split1D();
-                frameBuffer->split2D();
             }
             frameBuffers[frameIndex] = frameBuffer;
             return frameBuffer;
         };
 
-        const auto runNnPass = [&](FrameBuffer &first, FrameBuffer &second) {
+        // What a tile pass sees of a frame, or nothing if its samples can't
+        // be matched across decode calls. Every padding frame looks the same
+        // to a pass, whatever metadata it carries.
+        const auto frameToken = [&](int32_t frameIndex) -> std::optional<FrameToken> {
+            const int32_t fieldIndex = startIndex + (frameIndex * 2);
+            if (fieldIndex < 0 || (fieldIndex + 1) >= static_cast<int32_t>(inputFields.size())) {
+                return FrameToken{};
+            }
+            const auto &firstField = inputFields[fieldIndex];
+            const auto &secondField = inputFields[fieldIndex + 1];
+            if (firstField.isPadding || secondField.isPadding) return FrameToken{};
+            if (!firstField.inputRevision || !secondField.inputRevision) return std::nullopt;
+            return FrameToken{firstField.fieldNumber, secondField.fieldNumber, *firstField.inputRevision};
+        };
+
+        const auto runNnPass = [&](FrameBuffer &first, FrameBuffer &second)
+            -> std::shared_ptr<const TilePassResult> {
             if (nnSession != nullptr) {
-                return first.split3DnnTransform(second, *nnSession, nnRunMutex,
-                                                configuration.nnInputMagnitudeScale);
+                return first.runNnTilePass(second, *nnSession, nnRunMutex,
+                                           configuration.nnInputMagnitudeScale);
             }
             static std::once_flag noSessionWarnedOnce;
             std::call_once(noSessionWarnedOnce, []() {
                 chd::log::warn() << "nnTransform3D enabled but no NN session bound; falling back to 2D chroma";
             });
-            return false;
+            return nullptr;
         };
 
         // A frame is complete only after both tile passes that overlap it,
         // (N-1,N) and (N,N+1). The first frame of a call takes (N-1,N) from the
         // look-behind frame; later ones got it on the previous iteration.
-        bool backwardPassCompleted = runNnPass(*getFrameBuffer(-1), *getFrameBuffer(0));
+        const auto getTilePass = [&](int32_t firstFrameIndex) -> std::shared_ptr<const TilePassResult> {
+            const auto compute = [&] {
+                return runNnPass(*getFrameBuffer(firstFrameIndex), *getFrameBuffer(firstFrameIndex + 1));
+            };
+            if (tilePassCache == nullptr) return compute();
+
+            const auto first = frameToken(firstFrameIndex);
+            const auto second = frameToken(firstFrameIndex + 1);
+            if (!first || !second) {
+                tilePassCache->noteBypass();
+                return compute();
+            }
+            const uint64_t engineGeneration = nnSession != nullptr ? nnSession->outputGeneration() : 0;
+            return tilePassCache->getOrCompute(TilePassKey{*first, *second, engineGeneration}, compute);
+        };
+
+        auto backwardPass = getTilePass(-1);
         frameBuffers.erase(-1);
 
         for (int32_t frameIndex = 0; frameIndex < frameCount; frameIndex++) {
+            // Only the frame being output needs its 1D and 2D chroma; tile
+            // passes read the raw samples of both frames.
             auto currentFrameBuffer = getFrameBuffer(frameIndex);
-            auto nextFrameBuffer    = getFrameBuffer(frameIndex + 1);
+            currentFrameBuffer->split1D();
+            currentFrameBuffer->split2D();
 
-            const bool forwardPassCompleted = runNnPass(*currentFrameBuffer, *nextFrameBuffer);
+            auto forwardPass = getTilePass(frameIndex);
 
             componentFrames[frameIndex].init(videoParameters);
             currentFrameBuffer->setComponentFrame(componentFrames[frameIndex]);
             currentFrameBuffer->copyRawToLuma();
-            if (backwardPassCompleted && forwardPassCompleted) {
-                currentFrameBuffer->finalizeNnTransform3D();
+            if (backwardPass != nullptr && forwardPass != nullptr) {
+                currentFrameBuffer->finalizeNnTransform3D(*backwardPass, *forwardPass);
             } else {
                 currentFrameBuffer->fallbackNnTransform3DTo2D();
             }
@@ -252,7 +290,7 @@ void Comb::decodeFrames(const std::vector<chd::decoders::SourceField> &inputFiel
             currentFrameBuffer->doYNR();
             currentFrameBuffer->transformIQ(configuration.chromaGain, configuration.chromaPhase);
 
-            backwardPassCompleted = forwardPassCompleted;
+            backwardPass = std::move(forwardPass);
             frameBuffers.erase(frameIndex);
         }
         return;
@@ -1297,18 +1335,47 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
 #endif  // CHD_WITH_ORT
 }
 
+std::shared_ptr<const Comb::TilePassResult> Comb::FrameBuffer::runNnTilePass(FrameBuffer &nextFrame,
+                                                                             chd::nn::InferenceEngine &engine,
+                                                                             std::mutex &runMutex,
+                                                                             double inputMagnitudeScale)
+{
+    const auto clearAccumulators = [](FrameBuffer &frame) {
+        frame.nnAccChroma.clear();
+        frame.nnWeightSum.clear();
+    };
+    clearAccumulators(*this);
+    clearAccumulators(nextFrame);
+
+    if (!split3DnnTransform(nextFrame, engine, runMutex, inputMagnitudeScale)) {
+        // A failed pass can leave partial sums behind.
+        clearAccumulators(*this);
+        clearAccumulators(nextFrame);
+        return nullptr;
+    }
+
+    auto result = std::make_shared<TilePassResult>();
+    result->first = { std::move(nnAccChroma), std::move(nnWeightSum) };
+    result->second = { std::move(nextFrame.nnAccChroma), std::move(nextFrame.nnWeightSum) };
+    clearAccumulators(*this);
+    clearAccumulators(nextFrame);
+    return result;
+}
+
 // Normalise the overlap-add chroma into clpbuffer[2] so the rest of the
 // chroma demodulation pipeline (splitIQ → filterIQ → ...) picks it up
 // unchanged (configuration.dimensions==3 ⇒ splitIQ reads clpbuffer[2]).
-void Comb::FrameBuffer::finalizeNnTransform3D()
+void Comb::FrameBuffer::finalizeNnTransform3D(const TilePassResult &backwardPass, const TilePassResult &forwardPass)
 {
+    const auto &backward = backwardPass.second;
+    const auto &forward = forwardPass.first;
     for (int32_t lineNumber = videoParameters.firstActiveFrameLine;
          lineNumber <= videoParameters.lastActiveFrameLine; lineNumber++) {
         for (int32_t h = videoParameters.activeVideoStart;
              h < videoParameters.activeVideoEnd; h++) {
-            const double weight = nnWeightSum[lineNumber][h];
-            clpbuffer[2].pixel[lineNumber][h] =
-                (weight > 1.0e-6) ? (nnAccChroma[lineNumber][h] / weight) : 0.0;
+            const double weight = backward.weight[lineNumber][h] + forward.weight[lineNumber][h];
+            const double chroma = backward.chroma[lineNumber][h] + forward.chroma[lineNumber][h];
+            clpbuffer[2].pixel[lineNumber][h] = (weight > 1.0e-6) ? (chroma / weight) : 0.0;
         }
     }
 }

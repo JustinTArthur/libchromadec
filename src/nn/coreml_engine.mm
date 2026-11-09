@@ -274,6 +274,7 @@ std::unique_ptr<RunResult> CoreMLEngine::run(
                 if (cpu != nil) {
                     impl_->model = cpu;
                     units_ = CoreMLComputeUnits::CpuOnly;
+                    outputGeneration_.fetch_add(1, std::memory_order_release);
                     error = nil;
                     out = [cpu predictionFromFeatures:provider error:&error];
                 }

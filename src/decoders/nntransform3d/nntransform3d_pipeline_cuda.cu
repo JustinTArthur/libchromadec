@@ -497,8 +497,7 @@ bool runCudaPipeline(
     CHD_CUDA_CHECK_OR_CLEANUP(cudaMemcpy(dCvbsF0, currentRaw, cvbsBytes, cudaMemcpyHostToDevice));
     CHD_CUDA_CHECK_OR_CLEANUP(cudaMemcpy(dCvbsF1, nextRaw,    cvbsBytes, cudaMemcpyHostToDevice));
 
-    // Flatten + upload accumulators (may carry partial contributions from
-    // a previous split3DnnTransform call).
+    // Flatten + upload the accumulators.
     std::vector<double> flat(static_cast<size_t>(frameHeight) * fieldWidth);
 
     flattenInto(flat.data(), currentAccChroma, fieldWidth, frameHeight);

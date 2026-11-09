@@ -25,6 +25,9 @@
 #include "../metadata/core.h"
 
 #include "decoder_base.h"
+#if defined(CHD_WITH_NN)
+#include "comb/comb.h"
+#endif
 
 #if defined(CHD_WITH_NN)
 namespace chd::nn { class InferenceEngine; }
@@ -68,6 +71,11 @@ std::unique_ptr<chd::decoders::Decoder> build(chd_decoder_kind_t kind,
 bool applyNnModel(chd_decoder_kind_t kind,
                   chd::decoders::Decoder &decoder,
                   std::shared_ptr<chd::nn::InferenceEngine> engine);
+
+// Share a tile-pass cache with an nnTransform3D decoder. Other kinds ignore it.
+void applyTilePassCache(chd_decoder_kind_t kind,
+                        chd::decoders::Decoder &decoder,
+                        std::shared_ptr<chd::decoders::comb::Comb::TilePassCache> cache);
 #endif
 
 // True if `kind` is one of the NN-driven kinds (nnTransform3D, ldzeug2).

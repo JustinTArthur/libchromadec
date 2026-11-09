@@ -852,7 +852,8 @@ chd_status_t chd_video_add_extra_source_yc(chd_video_t *v,
 
 Register additional captures of the same content as replacement candidates for
 [dropout correction](#dropout-correction). Add them to the primary
-`chd_video_t` before creating a decoder.
+`chd_video_t` before creating a decoder. Once a decode has run with correction
+on, adding another fails with `CHD_E_INVALID_ARG`.
 
 ### chd_video_free
 
@@ -1455,8 +1456,9 @@ typedef struct chd_dropout_stats {
 chd_status_t chd_decoder_set_dropout(chd_decoder_t *d, const chd_dropout_opts_t *opts);
 ```
 
-Configure dropout correction on a decoder. Takes effect at the next
-[`chd_decoder_commit`](#chd_decoder_commit).
+Configure dropout correction on a decoder. Applies from the next decode. When
+enabled, correction covers every frame a decoder reads, including the
+look-behind and look-ahead frames of 3D decoders.
 
 ### chd_decoder_get_last_dropout_stats
 
@@ -1466,7 +1468,8 @@ chd_status_t chd_decoder_get_last_dropout_stats(const chd_decoder_t *d,
 ```
 
 Return the correction counters from the **most recent**
-[`chd_decode_frame`](#chd_decode_frame) on this decoder.
+[`chd_decode_frame`](#chd_decode_frame) on this decoder. They count only the
+decoded frame, not its look-around frames.
 
 ### chd_decoder_get_chroma_click_thresholds
 

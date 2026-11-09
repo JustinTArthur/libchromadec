@@ -163,6 +163,18 @@ chd_status_t setOpt(chd_decoder_t *d, const char *name,
     return CHD_OK;
 }
 
+#if defined(CHD_WITH_NN)
+// W workers on consecutive frames touch W+1 tile passes. One more keeps a pass
+// that a change of decode direction is about to reuse.
+size_t tilePassCacheEntries(size_t workers) { return workers + 2; }
+#endif
+
+// Each worker's look-around window, so workers at different positions don't
+// evict the frames another still needs.
+size_t correctedFrameCacheEntries(int32_t lookBehind, int32_t lookAhead, size_t workers) {
+    return static_cast<size_t>(lookBehind + 1 + lookAhead) * workers;
+}
+
 // Decode one source's frame into `outCF`, applying dropout correction using
 // that source's own metadata and extra sources. Used once for a plain
 // composite decode, and twice (luma + chroma) for a decode-level Y/C merge.
@@ -175,6 +187,7 @@ chd_status_t decodeSourceFrame(
     std::vector<chd_video_source> &extraSources,
     std::unique_ptr<chd::dropout::MultiSourceAlignment> &alignment,
     std::once_flag &alignmentOnce,
+    chd::dropout::CorrectedFrameCache &correctedFrames,
     int64_t frame_index, chd::output::ComponentFrame &outCF,
     chd::dropout::DropoutCorrectionStats &stats) {
     // Each source pairs its fields by its own as-opened order, swapped by the
@@ -196,12 +209,18 @@ chd_status_t decodeSourceFrame(
     chd::decoders::SourceField::loadFields(
         source, meta, firstFieldFirst, firstFrameNumber, /*numFrames=*/1, lookBehind, lookAhead,
         fields, startIndex, endIndex);
+    const bool correcting = d->dropoutOptsSet && d->dropoutOpts.enabled != 0;
+    const uint64_t correctionRevision = d->dropoutRevision.load(std::memory_order_acquire);
+    chd::decoders::SourceField::markInputRevisions(
+        fields, correcting ? std::optional<uint64_t>(correctionRevision) : std::nullopt);
 
-    // Apply dropout correction if requested. Single-source if no extras
-    // are attached; otherwise build a vector<ExtraSourceFrame> from each
+    // Apply dropout correction if requested, to every frame of the window so
+    // that 3D decoders never see a neighbour's dropouts. Single-source if no
+    // extras are attached; otherwise build a vector<ExtraSourceFrame> from each
     // chd_video_source and use the multi-source DropoutCorrector overload.
-    if (d->dropoutOptsSet && d->dropoutOpts.enabled != 0) {
-        chd::dropout::DropoutCorrector corrector(d->videoParameters);
+    if (correcting) {
+        // The alignment below and any corrected frame depend on the extras.
+        d->video->extraSourcesFrozen.store(true, std::memory_order_release);
 
         // Build the multi-source VBI alignment once. Its constructor scans
         // every source's field VBI, so it is cached on the decoder and shared
@@ -220,52 +239,84 @@ chd_status_t decodeSourceFrame(
             });
         }
 
-        std::vector<chd::dropout::ExtraSourceFrame> extras;
-        extras.reserve(extraSources.size());
-        for (size_t i = 0; i < extraSources.size(); ++i) {
-            auto &ex = extraSources[i];
-            if (ex.metadata == nullptr || ex.source == nullptr) continue;
-            const bool exFirstFieldFirst = d->firstFieldFirst(*ex.metadata);
-            const int32_t exFrames = ex.metadata->getNumberOfFrames(exFirstFieldFirst);
+        const auto correctWindowFrame = [&](const chd::decoders::SourceField &firstField,
+                                            const chd::decoders::SourceField &secondField,
+                                            int32_t frameNumber) {
+            std::vector<chd::dropout::ExtraSourceFrame> extras;
+            extras.reserve(extraSources.size());
+            for (size_t i = 0; i < extraSources.size(); ++i) {
+                auto &ex = extraSources[i];
+                if (ex.metadata == nullptr || ex.source == nullptr) continue;
+                const bool exFirstFieldFirst = d->firstFieldFirst(*ex.metadata);
+                const int32_t exFrames = ex.metadata->getNumberOfFrames(exFirstFieldFirst);
 
-            // Map the primary frame to the matching disc frame in this source
-            // (by VBI CAV/CLV number where available, positionally otherwise).
-            const int32_t exFrame = alignment->sourceFrameForPrimaryFrame(
-                firstFrameNumber, static_cast<int32_t>(i) + 1);
-            if (exFrame < 1 || exFrame > exFrames) {
-                // This source does not cover the primary's frame — skip it for
-                // this frame rather than padding with black.
-                continue;
+                // Map the primary frame to the matching disc frame in this source
+                // (by VBI CAV/CLV number where available, positionally otherwise).
+                const int32_t exFrame = alignment->sourceFrameForPrimaryFrame(
+                    frameNumber, static_cast<int32_t>(i) + 1);
+                if (exFrame < 1 || exFrame > exFrames) {
+                    // This source does not cover the primary's frame — skip it for
+                    // this frame rather than padding with black.
+                    continue;
+                }
+                const int32_t exFirst  = ex.metadata->getFirstFieldNumber(exFrame, exFirstFieldFirst);
+                const int32_t exSecond = ex.metadata->getSecondFieldNumber(exFrame, exFirstFieldFirst);
+
+                chd::dropout::ExtraSourceFrame esf;
+                esf.firstFieldData  = ex.source->getVideoField(exFirst);
+                esf.secondFieldData = ex.source->getVideoField(exSecond);
+                esf.firstFieldMeta  = ex.metadata->getField(exFirst);
+                esf.secondFieldMeta = ex.metadata->getField(exSecond);
+                esf.videoParams     = ex.metadata->getVideoParameters();
+                if (chd::decoders::SourceField::secondFieldIsShifted(esf.videoParams)) {
+                    chd::decoders::SourceField::shiftSecondField(esf.secondFieldData, esf.secondFieldMeta.dropOuts,
+                                                                 esf.videoParams.black16bIre);
+                }
+                // Quality: VITS bPSNR average; synthesized CVBS metadata leaves
+                // VitsMetrics inUse=false / bPSNR=0, which is fine — the
+                // corrector still treats it as a usable extra, just without a
+                // quality-based tiebreaker.
+                esf.quality = (esf.firstFieldMeta.vitsMetrics.bPSNR
+                             + esf.secondFieldMeta.vitsMetrics.bPSNR) / 2.0;
+                extras.push_back(std::move(esf));
             }
-            const int32_t exFirst  = ex.metadata->getFirstFieldNumber(exFrame, exFirstFieldFirst);
-            const int32_t exSecond = ex.metadata->getSecondFieldNumber(exFrame, exFirstFieldFirst);
 
-            chd::dropout::ExtraSourceFrame esf;
-            esf.firstFieldData  = ex.source->getVideoField(exFirst);
-            esf.secondFieldData = ex.source->getVideoField(exSecond);
-            esf.firstFieldMeta  = ex.metadata->getField(exFirst);
-            esf.secondFieldMeta = ex.metadata->getField(exSecond);
-            esf.videoParams     = ex.metadata->getVideoParameters();
-            // Quality: VITS bPSNR average; synthesized CVBS metadata leaves
-            // VitsMetrics inUse=false / bPSNR=0, which is fine — the
-            // corrector still treats it as a usable extra, just without a
-            // quality-based tiebreaker.
-            esf.quality = (esf.firstFieldMeta.vitsMetrics.bPSNR
-                         + esf.secondFieldMeta.vitsMetrics.bPSNR) / 2.0;
-            extras.push_back(std::move(esf));
-        }
+            chd::decoders::SourceField first = firstField;
+            chd::decoders::SourceField second = secondField;
+            auto corrected = std::make_shared<chd::dropout::CorrectedFrame>();
+            chd::dropout::DropoutCorrector corrector(d->videoParameters);
+            if (extras.empty()) {
+                corrector.correctFrame(first, second,
+                                       d->dropoutOpts.overcorrect != 0,
+                                       d->dropoutOpts.intra_field_only != 0,
+                                       &corrected->stats);
+            } else {
+                corrector.correctFrame(first, second,
+                                       extras,
+                                       d->dropoutOpts.overcorrect != 0,
+                                       d->dropoutOpts.intra_field_only != 0,
+                                       &corrected->stats);
+            }
+            corrected->firstFieldData = std::move(first.data);
+            corrected->secondFieldData = std::move(second.data);
+            return std::shared_ptr<const chd::dropout::CorrectedFrame>(std::move(corrected));
+        };
 
-        if (extras.empty()) {
-            corrector.correctFrame(fields[startIndex], fields[startIndex + 1],
-                                   d->dropoutOpts.overcorrect != 0,
-                                   d->dropoutOpts.intra_field_only != 0,
-                                   &stats);
-        } else {
-            corrector.correctFrame(fields[startIndex], fields[startIndex + 1],
-                                   extras,
-                                   d->dropoutOpts.overcorrect != 0,
-                                   d->dropoutOpts.intra_field_only != 0,
-                                   &stats);
+        for (size_t i = 0; i + 1 < fields.size(); i += 2) {
+            auto &firstField = fields[i];
+            auto &secondField = fields[i + 1];
+            // A padding frame carries frame 1's dropouts but none of its picture.
+            if (firstField.isPadding || secondField.isPadding) continue;
+            if (firstField.field.dropOuts.empty() && secondField.field.dropOuts.empty()) continue;
+
+            const int32_t frameNumber = firstFrameNumber - lookBehind + static_cast<int32_t>(i / 2);
+            const auto corrected = correctedFrames.getOrCompute(
+                {firstField.fieldNumber, secondField.fieldNumber, correctionRevision},
+                [&] { return correctWindowFrame(firstField, secondField, frameNumber); });
+            firstField.data = corrected->firstFieldData;
+            secondField.data = corrected->secondFieldData;
+            // Counters describe the frame being decoded, not its neighbours.
+            if (static_cast<int32_t>(i) == startIndex) stats = corrected->stats;
         }
     }
 
@@ -296,6 +347,7 @@ chd_status_t decodeFrameLocked(chd_decoder_t *d, size_t workerIdx,
             d, *d->video->source, *meta, *d->decoders[workerIdx],
             d->lookBehind, d->lookAhead, d->video->extraSources,
             d->multiSourceAlignment, d->multiSourceAlignmentOnce,
+            *d->correctedFrameCache,
             frame_index, primaryCF, stats);
         rc != CHD_OK) {
         return rc;
@@ -311,6 +363,7 @@ chd_status_t decodeFrameLocked(chd_decoder_t *d, size_t workerIdx,
                 *d->chromaDecoders[workerIdx], d->chromaLookBehind, d->chromaLookAhead,
                 d->video->chromaExtraSources,
                 d->chromaMultiSourceAlignment, d->chromaMultiSourceAlignmentOnce,
+                *d->chromaCorrectedFrameCache,
                 frame_index, chromaCF, chromaStats);
             rc != CHD_OK) {
             return rc;
@@ -890,6 +943,14 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
     }
 #endif
 
+#if defined(CHD_WITH_NN)
+    using TilePassCache = chd::decoders::comb::Comb::TilePassCache;
+    std::shared_ptr<TilePassCache> tilePassCache;
+    if (resolved == CHD_DEC_NN_TRANSFORM3D) {
+        tilePassCache = std::make_shared<TilePassCache>(tilePassCacheEntries(1));
+    }
+#endif
+
     // Build `threadCount` instances of one decoder kind, configured against
     // the post-padding vp. `applyNn` binds the pending NN session (only the
     // colour kind ever needs it; the luma Mono pass never does).
@@ -911,6 +972,7 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
                         "chd_decoder_commit: NN model bound to a non-NN decoder kind");
                     return CHD_E_DECODER_INCOMPATIBLE;
                 }
+                chd::decoders::registry::applyTilePassCache(kind, *inst, tilePassCache);
             }
 #else
             (void)applyNn;
@@ -972,6 +1034,15 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
         d->chromaLookAhead  = d->chromaDecoders.front()->getLookAhead();
     }
     d->threadCount = threadCount;
+    d->correctedFrameCache = std::make_shared<chd::dropout::CorrectedFrameCache>(
+        correctedFrameCacheEntries(d->lookBehind, d->lookAhead, 1));
+    if (ycMerge) {
+        d->chromaCorrectedFrameCache = std::make_shared<chd::dropout::CorrectedFrameCache>(
+            correctedFrameCacheEntries(d->chromaLookBehind, d->chromaLookAhead, 1));
+    }
+#if defined(CHD_WITH_NN)
+    d->tilePassCache = std::move(tilePassCache);
+#endif
 
     d->committed = true;
     return CHD_OK;
@@ -1045,6 +1116,14 @@ chd_status_t chd_decode_frames_async(chd_decoder_t *d,
     // (e.g. chd_decode_frame, which takes decoderMutexes[0]) would
     // self-deadlock on the non-recursive mutex otherwise.
     const size_t W = std::min<size_t>(n, d->decoders.size());
+    d->correctedFrameCache->ensureCapacity(correctedFrameCacheEntries(d->lookBehind, d->lookAhead, W));
+    if (d->chromaCorrectedFrameCache != nullptr) {
+        d->chromaCorrectedFrameCache->ensureCapacity(
+            correctedFrameCacheEntries(d->chromaLookBehind, d->chromaLookAhead, W));
+    }
+#if defined(CHD_WITH_NN)
+    if (d->tilePassCache != nullptr) d->tilePassCache->ensureCapacity(tilePassCacheEntries(W));
+#endif
     std::atomic<size_t> next{0};
     std::vector<std::thread> workers;
     workers.reserve(W);

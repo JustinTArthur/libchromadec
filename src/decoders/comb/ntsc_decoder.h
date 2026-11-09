@@ -61,6 +61,7 @@ public:
     // public C++ entry point that the C ABI's chd_decoder_set_nn_model
     // will dispatch to later; this only exposes the C++ surface.
     void setNnModel(std::shared_ptr<chd::nn::InferenceEngine> engine);
+    void setTilePassCache(std::shared_ptr<Comb::TilePassCache> cache);
 #endif
 
     void decodeFrames(const std::vector<chd::decoders::SourceField> &inputFields,
