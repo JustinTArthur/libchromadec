@@ -41,3 +41,7 @@ option('onnxruntime_root',
 option('rocm_root',
        type: 'string', value: '',
        description: 'ROCm install prefix used as CMAKE_PREFIX_PATH for the hipfft + hip dependency lookups. Empty (default) relies on the default CMake search path, which works on distros that install ROCm into /usr (Gentoo). Set to /opt/rocm on Ubuntu/RHEL/SLES with AMD\'s apt/dnf packaging.')
+
+option('rocm_offload_targets',
+       type: 'array', value: ['auto'],
+       description: 'GPU targets to build the HIP kernels for, each passed to hipcc as --offload-arch: gfx names, generic targets such as gfx9-generic, or amdgcnspirv for SPIR-V the HIP runtime compiles for whatever GPU it finds. auto (default, and only valid alone) builds amdgcnspirv plus native code for each GPU visible while configuring. Binaries meant for other machines should list their targets explicitly.')

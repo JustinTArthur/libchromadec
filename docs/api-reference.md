@@ -942,6 +942,10 @@ Apply pending options and prepare the decoder for use. **Required before the
 first [`chd_decode_frame`](#chd_decode_frame).** Cheap to call repeatedly.
 Call it again after changing options.
 
+Returns `CHD_E_NN_BACKEND_UNAVAILABLE` if an nnTransform3D decoder's MIGraphX
+model is on a GPU this build has
+[no kernels for](nn-models.md#amd-gpu-targets-for-nntransform3d).
+
 ### chd_decoder_get_output_info
 
 ```c

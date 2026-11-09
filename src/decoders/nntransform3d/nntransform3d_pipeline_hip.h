@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "nntransform3d_window.h"
@@ -27,6 +28,11 @@
 namespace chd::nn { class OrtSession; }
 
 namespace chd::decoders::nntransform3d {
+
+// Whether this library's kernels can run on HIP device `deviceId`. Launching
+// them on a GPU with no usable code object crashes inside the HIP runtime, so
+// call this before runHipPipeline can be reached. On false, `whyNot` says why.
+bool hipKernelsRunOnDevice(int deviceId, std::string &whyNot);
 
 // Run the nnTransform3D 3D-FFT + CNN-mask + IFFT pipeline on an AMD GPU
 // via HIP + hipFFT. See nntransform3d_pipeline_cuda.h for the parameter

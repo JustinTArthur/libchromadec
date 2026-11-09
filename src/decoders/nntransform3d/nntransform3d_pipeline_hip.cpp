@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "hip_offload_targets.h"
 #include "nntransform3d_fft_cpu.h"
 #include "nntransform3d_window.h"
 #include "../../common/log.h"
@@ -54,6 +55,19 @@ namespace {
         return false; \
     } \
 } while (0)
+
+// src/meson.build passes the list unquoted; see the note there.
+#define CHD_HIP_QUOTE_ARGS(...) #__VA_ARGS__
+#define CHD_HIP_QUOTE(...) CHD_HIP_QUOTE_ARGS(__VA_ARGS__)
+constexpr const char *kOffloadTargets = CHD_HIP_QUOTE(CHD_HIP_OFFLOAD_TARGETS);
+
+void freeOrWarn(void *deviceMemory) {
+    if (deviceMemory == nullptr) return;
+    const hipError_t err = hipFree(deviceMemory);
+    if (err != hipSuccess) {
+        chd::log::warn() << "nnTransform3D[HIP]: hipFree failed:" << hipGetErrorString(err);
+    }
+}
 
 // ─── Device kernels ────────────────────────────────────────────────────────
 // Same algorithm as the CUDA path; only the namespace prefix on the FFT
@@ -249,21 +263,21 @@ struct HipThreadCache {
     void releaseBatch() {
         if (pFwd)      { hipfftDestroy(pFwd);  pFwd = 0; }
         if (pInv)      { hipfftDestroy(pInv);  pInv = 0; }
-        if (dInBatch)  { hipFree(dInBatch);  dInBatch  = nullptr; }
-        if (dOutBatch) { hipFree(dOutBatch); dOutBatch = nullptr; }
-        if (dTrtInput) { hipFree(dTrtInput); dTrtInput = nullptr; }
-        if (dMask)     { hipFree(dMask);     dMask     = nullptr; }
-        if (dLedgerY)  { hipFree(dLedgerY);  dLedgerY  = nullptr; }
-        if (dLedgerX)  { hipFree(dLedgerX);  dLedgerX  = nullptr; }
-        if (dLedgerDc) { hipFree(dLedgerDc); dLedgerDc = nullptr; }
+        freeOrWarn(dInBatch);  dInBatch  = nullptr;
+        freeOrWarn(dOutBatch); dOutBatch = nullptr;
+        freeOrWarn(dTrtInput); dTrtInput = nullptr;
+        freeOrWarn(dMask);     dMask     = nullptr;
+        freeOrWarn(dLedgerY);  dLedgerY  = nullptr;
+        freeOrWarn(dLedgerX);  dLedgerX  = nullptr;
+        freeOrWarn(dLedgerDc); dLedgerDc = nullptr;
         cachedNumBlocks = 0;
     }
 
     void releaseAll() {
         releaseBatch();
-        if (dWinT) { hipFree(dWinT); dWinT = nullptr; }
-        if (dWinY) { hipFree(dWinY); dWinY = nullptr; }
-        if (dWinX) { hipFree(dWinX); dWinX = nullptr; }
+        freeOrWarn(dWinT); dWinT = nullptr;
+        freeOrWarn(dWinY); dWinY = nullptr;
+        freeOrWarn(dWinX); dWinX = nullptr;
     }
 
     ~HipThreadCache() { releaseAll(); }
@@ -352,6 +366,54 @@ void unflattenFrom(std::vector<std::vector<double>> &dst, const double *src,
 
 }  // namespace
 
+bool hipKernelsRunOnDevice(int deviceId, std::string &whyNot) {
+    hipDeviceProp_t props{};
+    hipError_t err = hipGetDeviceProperties(&props, deviceId);
+    if (err != hipSuccess) {
+        whyNot = "couldn't query HIP device " + std::to_string(deviceId) + ": " +
+                 hipGetErrorString(err);
+        return false;
+    }
+
+    const std::string noKernels = "nnTransform3D's HIP kernels can't run on HIP device " +
+                                  std::to_string(deviceId) + " (" + props.gcnArchName +
+                                  "); this library was built for: " + kOffloadTargets;
+
+    switch (matchHipOffloadTargets(kOffloadTargets, props.gcnArchName)) {
+        case HipTargetMatch::Native:
+            return true;
+        case HipTargetMatch::None:
+            whyNot = noKernels;
+            return false;
+        case HipTargetMatch::RuntimeDecides:
+            break;
+    }
+
+    // SPIR-V or a generic target might serve this GPU, and only the runtime can
+    // tell. Asking resolves the code object, compiling SPIR-V if it has to.
+    // Runtimes built with assertions abort here when there's no code object,
+    // where a kernel launch would have crashed anyway; AMD's packaged runtimes
+    // return an error. Every kernel lives in this one file, so one is enough.
+    // The caller's thread may have its own use for HIP, so restore its device.
+    int callersDevice = -1;
+    if (hipGetDevice(&callersDevice) != hipSuccess) callersDevice = -1;
+    err = hipSetDevice(deviceId);
+    if (err != hipSuccess) {
+        whyNot = "couldn't select HIP device " + std::to_string(deviceId) + ": " +
+                 hipGetErrorString(err);
+        return false;
+    }
+    hipFuncAttributes attributes{};
+    err = hipFuncGetAttributes(&attributes, reinterpret_cast<const void *>(calcDCKernel));
+    if (callersDevice >= 0) (void)hipSetDevice(callersDevice);
+
+    if (err != hipSuccess) {
+        whyNot = noKernels + " (" + hipGetErrorString(err) + ")";
+        return false;
+    }
+    return true;
+}
+
 // ─── runHipPipeline ────────────────────────────────────────────────────────
 
 bool runHipPipeline(
@@ -413,12 +475,12 @@ bool runHipPipeline(
     double   *dWtF0   = nullptr, *dWtF1   = nullptr;
 
     auto cleanupFrameBuffers = [&]() {
-        if (dCvbsF0) hipFree(dCvbsF0);
-        if (dCvbsF1) hipFree(dCvbsF1);
-        if (dAccF0)  hipFree(dAccF0);
-        if (dAccF1)  hipFree(dAccF1);
-        if (dWtF0)   hipFree(dWtF0);
-        if (dWtF1)   hipFree(dWtF1);
+        freeOrWarn(dCvbsF0);
+        freeOrWarn(dCvbsF1);
+        freeOrWarn(dAccF0);
+        freeOrWarn(dAccF1);
+        freeOrWarn(dWtF0);
+        freeOrWarn(dWtF1);
     };
 
 #define CHD_HIP_CHECK_OR_CLEANUP(expr) do { \
@@ -468,11 +530,16 @@ bool runHipPipeline(
     const int blocksForAll    = (totalElements + kThreadsPerBlock - 1) / kThreadsPerBlock;
     const int blockSize       = static_cast<int>(kNt * kNy * kNx);
 
+    // The launch checks below read HIP's last error, which an earlier call on
+    // this thread may have left behind. Don't blame the kernels for it.
+    (void)hipGetLastError();
+
     calcDCKernel<<<blocksForLedger, kThreadsPerBlock>>>(
         dCvbsF0, dCvbsF1, padF0, padF1,
         cache.dLedgerY, cache.dLedgerX, cache.dLedgerDc,
         numBlocks, activeStartX, activeEndX,
         firstActiveY, lastActiveY, fieldWidth);
+    CHD_HIP_CHECK_OR_CLEANUP(hipGetLastError());
 
     packAndWindowKernel<<<blocksForAll, kThreadsPerBlock>>>(
         dCvbsF0, dCvbsF1, padF0, padF1,
@@ -481,6 +548,7 @@ bool runHipPipeline(
         cache.dWinT, cache.dWinY, cache.dWinX,
         numBlocks, blockSize, activeStartX, activeEndX,
         firstActiveY, lastActiveY, fieldWidth);
+    CHD_HIP_CHECK_OR_CLEANUP(hipGetLastError());
     CHD_HIP_CHECK_OR_CLEANUP(hipDeviceSynchronize());
 
     CHD_HIPFFT_CHECK_OR_CLEANUP(hipfftExecZ2Z(cache.pFwd, cache.dInBatch, cache.dOutBatch, HIPFFT_FORWARD));
@@ -488,6 +556,7 @@ bool runHipPipeline(
     calcMagnitudeKernel<<<blocksForAll, kThreadsPerBlock>>>(
         cache.dOutBatch, cache.dTrtInput,
         numBlocks, blockSize, inputMagnitudeScale);
+    CHD_HIP_CHECK_OR_CLEANUP(hipGetLastError());
     CHD_HIP_CHECK_OR_CLEANUP(hipDeviceSynchronize());
 
     try {
@@ -515,8 +584,12 @@ bool runHipPipeline(
         return false;
     }
 
+    // Run() may have left a HIP error it handled itself.
+    (void)hipGetLastError();
+
     applyMaskKernel<<<blocksForAll, kThreadsPerBlock>>>(
         cache.dOutBatch, cache.dMask, totalElements);
+    CHD_HIP_CHECK_OR_CLEANUP(hipGetLastError());
     CHD_HIP_CHECK_OR_CLEANUP(hipDeviceSynchronize());
 
     CHD_HIPFFT_CHECK_OR_CLEANUP(hipfftExecZ2Z(cache.pInv, cache.dOutBatch, cache.dInBatch, HIPFFT_BACKWARD));
@@ -530,6 +603,7 @@ bool runHipPipeline(
         numBlocks, blockSize,
         activeStartX, activeEndX,
         firstActiveY, lastActiveY, fieldWidth);
+    CHD_HIP_CHECK_OR_CLEANUP(hipGetLastError());
     CHD_HIP_CHECK_OR_CLEANUP(hipDeviceSynchronize());
 
     CHD_HIP_CHECK_OR_CLEANUP(hipMemcpy(flat.data(), dAccF0, accBytes, hipMemcpyDeviceToHost));

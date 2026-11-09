@@ -114,6 +114,12 @@ test_ntsc_burst = executable('test_ntsc_burst',
   dependencies: chromadec_internal_dep)
 test('ntsc_burst', test_ntsc_burst)
 
+# Matching built HIP offload targets against a GPU name. Needs no HIP.
+test_hip_offload_targets = executable('test_hip_offload_targets',
+  'unit/test_hip_offload_targets.cpp',
+  dependencies: chromadec_internal_dep)
+test('hip_offload_targets', test_hip_offload_targets)
+
 # format/ DATA-table sanity tests (preset lookup, sample conversion, signal-state
 # mappings).
 test_format_presets = executable('test_format_presets',
@@ -181,16 +187,6 @@ test_integration = executable('test_integration',
 test('integration', test_integration,
      timeout: 120)  # encode-orc takes a couple of seconds for one frame
 
-# end-to-end C ABI decode loop (chd_decoder_create →
-# chd_decoder_set_option_* → chd_decoder_commit → chd_decode_frame →
-# chd_frame_get_plane). The synthetic-TBC fixture is built in-test (same shape
-# as test_encode_orc_color_bars). Also covers chd_decode_frames_async +
-# chd_cancel_t.
-test_decode_frame_abi = executable('test_decode_frame_abi',
-  'unit/test_decode_frame_abi.cpp',
-  dependencies: [chromadec_abi_dep, sqlite3_dep, threads_dep])
-test('decode_frame_abi', test_decode_frame_abi)
-
 # Decode-free dropout detection C ABI: CHD_DEC_NONE geometry-only commit,
 # chd_decoder_get_output_info, chd_decoder_get_dropout_spans (field-relative
 # dropouts mapped into active-output coordinates), and chd_decode_dropout_mask
@@ -245,6 +241,17 @@ test_nn_framework = executable('test_nn_framework',
   cpp_args: [nn_fixture_arg],
   dependencies: chromadec_abi_dep)
 test('nn_framework', test_nn_framework, depends: ort_test_runtime)
+
+# end-to-end C ABI decode loop (chd_decoder_create →
+# chd_decoder_set_option_* → chd_decoder_commit → chd_decode_frame →
+# chd_frame_get_plane). The synthetic-TBC fixture is built in-test (same shape
+# as test_encode_orc_color_bars). Also covers chd_decode_frames_async +
+# chd_cancel_t, and committing an NN decoder with a model on the CPU provider.
+test_decode_frame_abi = executable('test_decode_frame_abi',
+  'unit/test_decode_frame_abi.cpp',
+  cpp_args: [nn_fixture_arg],
+  dependencies: [chromadec_abi_dep, sqlite3_dep, threads_dep])
+test('decode_frame_abi', test_decode_frame_abi, depends: ort_test_runtime)
 
 # Plugin execution-provider registration against a stub plugin library. The
 # stub only needs ONNX Runtime's C header, not its library. Each stub mode runs

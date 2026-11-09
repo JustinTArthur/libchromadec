@@ -133,6 +133,19 @@ if has_rocm
   foreach incdir : ort_incdirs
     rocm_compile_args += '-I' + incdir
   endforeach
+  # The list also goes in as a macro, for the check that the kernels can run on
+  # a given GPU. It's stringified in the source because hipcc hands its command
+  # line to a shell, which would strip quotes written here.
+  rocm_compile_args += '-DCHD_HIP_OFFLOAD_TARGETS=' + ','.join(rocm_offload_targets)
+  rocm_uses_generic_target = false
+  foreach target : rocm_offload_targets
+    rocm_compile_args += '--offload-arch=' + target
+    rocm_uses_generic_target = rocm_uses_generic_target or target.contains('-generic')
+  endforeach
+  if rocm_uses_generic_target
+    # Generic targets only exist from code object version 6.
+    rocm_compile_args += '-mcode-object-version=6'
+  endif
   # hipcc writes the header dependencies with -MD -MF; without a depfile Meson
   # would treat the object as depending on the .cpp alone and editing any header
   # it includes would leave a stale object behind.

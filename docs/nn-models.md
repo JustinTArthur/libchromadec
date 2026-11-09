@@ -126,6 +126,33 @@ The plugin gets `device_id` and, when caching is on, `engine_cache_dir` as its
 that directory, and its other `ORT_MIGRAPHX_*` variables apply as they would in
 any ONNX Runtime host.
 
+### AMD GPU targets for nnTransform3D
+
+nnTransform3D's FFT stage on MIGraphX runs as HIP kernels compiled into the
+library, so the build decides which AMD GPUs it can use. Set the list with
+`-Drocm_offload_targets=`:
+
+| Entry                        | Runs on                                                          |
+|------------------------------|------------------------------------------------------------------|
+| `auto` (default, only alone) | The GPUs visible when configuring, plus SPIR-V for any other GPU |
+| `amdgcnspirv`                | Any GPU the HIP runtime can compile SPIR-V for, on first use     |
+| `gfx950`, `gfx906`, ...      | Exactly that GPU                                                 |
+| `gfx9-generic`, ...          | GPUs in that family that the runtime accepts                     |
+
+Anything you ship to other machines should list its targets, so the result
+doesn't depend on the machine that built it. Not every ROCm install can compile
+SPIR-V at run time (Gentoo's packages can't), so a GPU on one of those needs a
+native or generic target.
+
+`chd_decoder_commit` returns `CHD_E_NN_BACKEND_UNAVAILABLE` for an
+nnTransform3D decoder whose MIGraphX model is on a GPU the build has no kernels
+for, even when `CHD_NN_BACKEND_AUTO` picked MIGraphX, and the last error names
+the GPU and the built targets. The ldzeug2 kinds don't use these kernels.
+
+HIP runtimes built with assertions enabled, as Gentoo's is, abort the process
+instead of reporting that failure when only SPIR-V or generic targets could have
+served the GPU. A build with only native targets always reports it.
+
 ### Native CoreML (macOS)
 
 To run a model on GPU/ANE through CoreML directly — rather than through ONNX

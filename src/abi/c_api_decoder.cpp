@@ -23,6 +23,10 @@
 #include <vector>
 
 #include "../common/error_state.h"
+#if defined(CHD_WITH_ROCM)
+#include "../decoders/nntransform3d/nntransform3d_pipeline_hip.h"
+#include "../nn/ort_engine.h"
+#endif
 #include "../decoders/registry.h"
 #include "../decoders/source_field.h"
 #include "../dropout/dropout_corrector.h"
@@ -867,6 +871,22 @@ chd_status_t chd_decoder_commit(chd_decoder_t *d) {
         chd::detail::set_last_error(
             "chd_decoder_commit: NN decoder kind requires chd_decoder_set_nn_model first");
         return CHD_E_NN_MODEL_LOAD;
+    }
+#endif
+
+#if defined(CHD_WITH_ROCM)
+    // Launching a kernel with no code object for the GPU takes the process
+    // down, so this has to be settled before any frame reaches the pipeline.
+    if (resolved == CHD_DEC_NN_TRANSFORM3D && d->nnModelPending &&
+        d->nnModelPending->activeBackend() == CHD_NN_ORT_MIGRAPHX) {
+        if (auto *ortEngine = dynamic_cast<chd::nn::OrtEngine *>(d->nnModelPending.get())) {
+            std::string whyNot;
+            if (!chd::decoders::nntransform3d::hipKernelsRunOnDevice(ortEngine->deviceId(),
+                                                                     whyNot)) {
+                chd::detail::set_last_error("chd_decoder_commit: " + whyNot);
+                return CHD_E_NN_BACKEND_UNAVAILABLE;
+            }
+        }
     }
 #endif
 

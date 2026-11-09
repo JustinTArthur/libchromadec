@@ -253,6 +253,7 @@ rocm_opt = get_option('with_rocm').disable_if(
   host_machine.system() != 'linux',
   error_message: 'ROCm is Linux-only')
 has_rocm = false
+rocm_offload_targets = []
 if not rocm_opt.disabled()
   hipcc = find_program('hipcc', required: rocm_opt)
   # Always include /opt/rocm (AMD's apt/dnf default on Ubuntu/RHEL/SLES);
@@ -277,6 +278,41 @@ if not rocm_opt.disabled()
                           required: rocm_opt)
   if hipcc.found() and hipfft_dep.found() and hip_rt_dep.found()
     has_rocm = true
+
+    # Name hipcc's targets ourselves: left to detect them, it builds for the
+    # GPUs on this machine, and with none visible it builds only clang's
+    # default of gfx906.
+    rocm_offload_targets = get_option('rocm_offload_targets')
+    if rocm_offload_targets.length() == 0
+      error('rocm_offload_targets is empty; list at least one target, or use auto')
+    endif
+    if 'auto' in rocm_offload_targets
+      if rocm_offload_targets.length() != 1
+        error('rocm_offload_targets: auto can\'t be combined with other targets')
+      endif
+      rocm_offload_targets = ['amdgcnspirv']
+      rocm_bin_dirs = []
+      foreach prefix : hip_cmake_prefixes
+        rocm_bin_dirs += prefix / 'bin'
+      endforeach
+      rocm_agent_enumerator = find_program('rocm_agent_enumerator',
+                                           dirs: rocm_bin_dirs,
+                                           required: false)
+      if rocm_agent_enumerator.found()
+        rocm_agents = run_command(rocm_agent_enumerator, '-t', 'GPU', check: false)
+        if rocm_agents.returncode() == 0
+          foreach agent : rocm_agents.stdout().split()
+            # gfx000 is the CPU agent. A box can hold several of the same GPU.
+            if agent.startswith('gfx') and agent != 'gfx000' and agent not in rocm_offload_targets
+              rocm_offload_targets += agent
+            endif
+          endforeach
+        endif
+      endif
+      if rocm_offload_targets.length() == 1
+        message('rocm_agent_enumerator listed no GPUs here; building HIP kernels as SPIR-V only')
+      endif
+    endif
   endif
 endif
 
@@ -426,6 +462,7 @@ summary({
   'ONNX Runtime backend':          has_ort,
   'CUDA cuFFT pipeline (NV/TRT)':  has_cuda,
   'HIP hipFFT pipeline (ROCm/MX)': has_rocm,
+  'HIP offload targets':           has_rocm ? ','.join(rocm_offload_targets) : 'n/a',
   'CoreML pipeline (macOS)':       has_coreml,
   'FFTW3 (Transform-PAL)':         has_fftw,
   'hvd-core (HVD Y/C engine)':     has_hvd,

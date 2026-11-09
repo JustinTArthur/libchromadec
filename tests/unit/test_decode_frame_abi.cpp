@@ -35,6 +35,8 @@
 
 #include <sqlite3.h>
 
+#include "nn_test_model.h"
+
 namespace fs = std::filesystem;
 
 #define REQUIRE(cond)                                                            \
@@ -953,6 +955,54 @@ int testNnMagnitudeScaleRange(const fs::path &dir) {
     return 0;
 }
 
+// ─── Test: an NN decoder commits with a model on the CPU provider. ─────────
+//
+// The route every NN decode takes through the public ABI, including the check
+// that GPU kernels can run, which has to stay out of the way for a CPU model.
+// Commits without decoding, so the fixture's meaningless graph is enough.
+int testNnDecoderCommitOnCpu(const fs::path &dir) {
+    if (chd_has_feature("onnxruntime") != 1) return 0;
+
+    const std::string tbc     = (dir / "nn_commit.tbc").string();
+    const std::string sidecar = (dir / "nn_commit.tbc.db").string();
+    REQUIRE(writeBlackTbc(tbc, 910, 263, 4));
+    REQUIRE(writeTbcSidecar(sidecar, 4));
+
+    chd_video_t *video = nullptr;
+    REQUIRE(chd_video_open_composite(tbc.c_str(), sidecar.c_str(), nullptr, &video) == CHD_OK);
+
+    chd_nn_session_opts_t opts;
+    chd_nn_session_opts_default(&opts);
+    opts.backend = CHD_NN_ORT_CPU;
+    chd_nn_model_t *model = nullptr;
+    REQUIRE(chd_nn_model_load_from_file(chd_test::syntheticFixture().c_str(), &opts, &model)
+            == CHD_OK);
+    chd_nn_backend_t active = CHD_NN_BACKEND_AUTO;
+    REQUIRE(chd_nn_model_get_active_backend(model, &active) == CHD_OK);
+    REQUIRE(active == CHD_NN_ORT_CPU);
+
+    chd_decoder_t *dec = nullptr;
+    REQUIRE(chd_decoder_create(video, CHD_DEC_NN_TRANSFORM3D, &dec) == CHD_OK);
+
+    // A refused commit leaves the decoder usable once the model is attached.
+    REQUIRE(chd_decoder_commit(dec) == CHD_E_NN_MODEL_LOAD);
+    REQUIRE(chd_decoder_set_nn_model(dec, model) == CHD_OK);
+    REQUIRE(chd_decoder_commit(dec) == CHD_OK);
+
+    chd_output_info_t info{};
+    REQUIRE(chd_decoder_get_output_info(dec, &info) == CHD_OK);
+
+    // Nothing can swap the model out after the checks at commit have run.
+    REQUIRE(chd_decoder_set_nn_model(dec, model) == CHD_E_INVALID_ARG);
+
+    chd_decoder_free(dec);
+    chd_nn_model_free(model);
+    chd_video_free(video);
+    fs::remove(tbc);
+    fs::remove(sidecar);
+    return 0;
+}
+
 // ─── Test: float output formats expose normalized E'Y E'Cb E'Cr. ───────────
 //
 // Black NTSC input → E'Y = 0.0 (black) and neutral chroma E'Cb = E'Cr = 0.0,
@@ -1787,6 +1837,7 @@ int main() {
     if (int rc = testActiveLineSidecarOverride(dir);  rc != 0) return rc;
     if (int rc = testActiveLineCropBounds(dir);       rc != 0) return rc;
     if (int rc = testNnMagnitudeScaleRange(dir);      rc != 0) return rc;
+    if (int rc = testNnDecoderCommitOnCpu(dir);       rc != 0) return rc;
     if (int rc = testFloatOutputFormats(dir);         rc != 0) return rc;
     if (int rc = testRgbsOutputFormat(dir);           rc != 0) return rc;
     if (int rc = testOutputClampOption(dir);          rc != 0) return rc;
@@ -1797,6 +1848,10 @@ int main() {
     if (int rc = testPaddingAndSampleCrop(dir);       rc != 0) return rc;
     if (int rc = testSignalLineConversion(dir);       rc != 0) return rc;
     if (int rc = testStandardSampleConversion(dir);   rc != 0) return rc;
+
+    // A model was loaded, so ONNX Runtime has to go down before static
+    // destruction reaches its globals.
+    chd_shutdown();
 
     fs::remove(dir);
     std::cout << "test_decode_frame_abi: PASS\n";
