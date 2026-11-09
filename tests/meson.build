@@ -90,6 +90,12 @@ test_secam_decoder = executable('test_secam_decoder',
 # it runs several times longer than the 30s meson default and was timing out.
 test('secam_decoder', test_secam_decoder, timeout: 300)
 
+# Concurrent FFTW planning from every site in the library.
+test_fftw_planner_threads = executable('test_fftw_planner_threads',
+  'unit/test_fftw_planner_threads.cpp',
+  dependencies: chromadec_internal_dep)
+test('fftw_planner_threads', test_fftw_planner_threads, timeout: 120)
+
 # HVD bridge against a synthetic NTSC generator built from the engine's own
 # physical definitions; needs the hvd-core headers, so it exists only on a
 # build that has the engine.

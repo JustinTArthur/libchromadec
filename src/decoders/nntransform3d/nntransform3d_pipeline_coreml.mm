@@ -398,8 +398,8 @@ bool runCoreMLPipeline(
     // for both paths, the IFFT result the overlap-add reads). The Layer-1 host
     // path also uses specStore + modelInput; the resident path keeps those on
     // the GPU instead.
-    static thread_local std::vector<double> inStore;
-    static thread_local std::vector<double> specStore;
+    static thread_local FftwAlignedDoubles inStore;
+    static thread_local FftwAlignedDoubles specStore;
     static thread_local std::vector<float>  modelInput;
     inStore.resize(static_cast<size_t>(kBatchBlocks) * kBlockSize * 2);
     auto *inBatch   = reinterpret_cast<fftw_complex *>(inStore.data());
@@ -410,7 +410,7 @@ bool runCoreMLPipeline(
         specBatch = reinterpret_cast<fftw_complex *>(specStore.data());
     }
 
-    auto &plans = getThreadLocalCpuPlans();
+    const auto &plans = getCpuPlans();
     if (!useResident && (plans.forward == nullptr || plans.inverse == nullptr)) return false;
 
     for (int chunkStart = 0; chunkStart < numBlocks; chunkStart += kBatchBlocks) {

@@ -31,7 +31,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <mutex>
 
+#include "../../common/fftw_planner.h"
 #include "../../output/frame_canvas.h"
 
 namespace chd::decoders::palcolour {
@@ -82,6 +84,7 @@ TransformPal2D::TransformPal2D()
     fftComplexOut = fftw_alloc_complex(YCOMPLEX * XCOMPLEX);
 
     // Plan FFTW operations
+    std::lock_guard<std::mutex> plannerLock(chd::fftwPlannerMutex());
     forwardPlan = fftw_plan_dft_r2c_2d(YTILE, XTILE, fftReal, fftComplexIn, FFTW_MEASURE);
     inversePlan = fftw_plan_dft_c2r_2d(YTILE, XTILE, fftComplexOut, fftReal, FFTW_MEASURE);
 }
@@ -89,8 +92,7 @@ TransformPal2D::TransformPal2D()
 TransformPal2D::~TransformPal2D()
 {
     // Free FFTW plans and buffers
-    fftw_destroy_plan(forwardPlan);
-    fftw_destroy_plan(inversePlan);
+    chd::destroyFftwPlans(forwardPlan, inversePlan);
     fftw_free(fftReal);
     fftw_free(fftComplexIn);
     fftw_free(fftComplexOut);

@@ -997,8 +997,8 @@ inline int32_t IDX3(int32_t t, int32_t y, int32_t x, int32_t Nt, int32_t Ny, int
 //   - In-loop QCoreApplication::processEvents removed (no Qt event loop).
 //   - Cancellation atomic removed; chd_cancel_t support lands later.
 //   - FFTW plans + sine windows come from
-//     chd::decoders::nntransform3d::{getThreadLocalCpuPlans,
-//     getSineWindows} rather than thread_local statics inline.
+//     chd::decoders::nntransform3d::{getCpuPlans, getSineWindows} rather
+//     than thread_local statics inline.
 bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
                                            chd::nn::InferenceEngine &engine,
                                            std::mutex &runMutex,
@@ -1098,7 +1098,7 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
     }
     chd::nn::OrtSession &session = ortEngine->ortSession();
 
-    auto &plans = nntransform3d::getThreadLocalCpuPlans();
+    const auto &plans = nntransform3d::getCpuPlans();
     if (plans.forward == nullptr || plans.inverse == nullptr) {
         chd::log::warn() << "nnTransform3D: failed to acquire FFTW plans; falling back to 2D";
         return false;
@@ -1110,14 +1110,14 @@ bool Comb::FrameBuffer::split3DnnTransform(FrameBuffer &nextFrame,
 
     // Per-call tile scratch buffers — thread_local so concurrent worker
     // threads don't fight over them.
-    static thread_local fftw_complex tileInput[kNt * kNy * kNx];
-    static thread_local fftw_complex tileSpectrum[kNt * kNy * kNx];
+    static thread_local nntransform3d::FftwAlignedDoubles tileInput(2 * kNt * kNy * kNx);
+    static thread_local nntransform3d::FftwAlignedDoubles tileSpectrum(2 * kNt * kNy * kNx);
     static thread_local float modelInput[2 * kNt * kNy * kNx];
     static thread_local float magnitudes[kNt * kNy * kNx];
     static thread_local Ort::MemoryInfo modelMemoryInfo =
         Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    auto *in = tileInput;
-    auto *out = tileSpectrum;
+    auto *in = reinterpret_cast<fftw_complex *>(tileInput.data());
+    auto *out = reinterpret_cast<fftw_complex *>(tileSpectrum.data());
 
     FrameBuffer *frames[2] = { this, &nextFrame };
     const bool padding[2] = { isPadding, nextFrame.isPadding };

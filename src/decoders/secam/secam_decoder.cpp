@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <mutex>
 
+#include "../../common/fftw_planner.h"
 #include "../../common/log.h"
 
 namespace chd::decoders::secam {
@@ -90,8 +92,7 @@ int32_t SecamDecoder::manualAnchorForField(int32_t seqNo) const
 
 SecamDecoder::~SecamDecoder()
 {
-    if (forwardPlan != nullptr) fftw_destroy_plan(forwardPlan);
-    if (inversePlan != nullptr) fftw_destroy_plan(inversePlan);
+    chd::destroyFftwPlans(forwardPlan, inversePlan);
     if (fftIn != nullptr) fftw_free(fftIn);
     if (fftFreq != nullptr) fftw_free(fftFreq);
     if (fftWork != nullptr) fftw_free(fftWork);
@@ -117,8 +118,7 @@ bool SecamDecoder::configure(const chd::metadata::LdDecodeMetaData::VideoParamet
     while (blockSize < width + 512) blockSize <<= 1;
     margin = (blockSize - width) / 2;
 
-    if (forwardPlan != nullptr) fftw_destroy_plan(forwardPlan);
-    if (inversePlan != nullptr) fftw_destroy_plan(inversePlan);
+    chd::destroyFftwPlans(forwardPlan, inversePlan);
     if (fftIn != nullptr) fftw_free(fftIn);
     if (fftFreq != nullptr) fftw_free(fftFreq);
     if (fftWork != nullptr) fftw_free(fftWork);
@@ -127,8 +127,11 @@ bool SecamDecoder::configure(const chd::metadata::LdDecodeMetaData::VideoParamet
     fftFreq = fftw_alloc_complex(blockSize);
     fftWork = fftw_alloc_complex(blockSize);
     fftOut  = fftw_alloc_complex(blockSize);
-    forwardPlan = fftw_plan_dft_1d(blockSize, fftIn, fftFreq, FFTW_FORWARD, FFTW_ESTIMATE);
-    inversePlan = fftw_plan_dft_1d(blockSize, fftWork, fftOut, FFTW_BACKWARD, FFTW_ESTIMATE);
+    {
+        std::lock_guard<std::mutex> plannerLock(chd::fftwPlannerMutex());
+        forwardPlan = fftw_plan_dft_1d(blockSize, fftIn, fftFreq, FFTW_FORWARD, FFTW_ESTIMATE);
+        inversePlan = fftw_plan_dft_1d(blockSize, fftWork, fftOut, FFTW_BACKWARD, FFTW_ESTIMATE);
+    }
 
     // Frequency-domain masks. The chroma/band masks depend on where the
     // capture's FM block actually sits, so they are rebuilt whenever the
