@@ -316,9 +316,9 @@ jobs:
         run: |
           . .venv/bin/activate
           if [ "${{ matrix.no_ort }}" = "true" ]; then
-            meson setup build -Dwith_onnxruntime=false
+            meson setup build -Dwith_examples=true -Dwith_onnxruntime=false
           else
-            meson setup build -Donnxruntime_root="${ORT_ROOT}"
+            meson setup build -Dwith_examples=true -Donnxruntime_root="${ORT_ROOT}"
           fi
 
       - name: Build
@@ -525,6 +525,7 @@ jobs:
         run: |
           meson setup build `
             --force-fallback-for=sqlite3 `
+            -Dwith_examples=true `
             "-Donnxruntime_root=$env:ORT_ROOT"
 
       - name: Build

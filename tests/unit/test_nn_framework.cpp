@@ -208,14 +208,31 @@ int testLoadRealModel() {
     // above, and the only place the public chd_nn_model_load_from_memory
     // symbol is exercised against real weights. Skips when no model is
     // discoverable on this machine.
+    // CI sets CHD_TEST_EXPECT_NN_BACKEND to the chd_nn_backend_t value the job
+    // exists to prove. Skipping past the assertion at the end would then take
+    // the job green having validated nothing, which is the outcome the variable
+    // is there to prevent, so the skips below become failures when it is set.
+    const char *const expect   = std::getenv("CHD_TEST_EXPECT_NN_BACKEND");
+    const bool        expectSet = expect != nullptr && *expect != '\0';
+
     // The committed fixture is ONNX, loaded through the ORT backend. Skip when
     // ORT isn't built (e.g. a native-CoreML-only build).
     if (chd_has_feature("onnxruntime") != 1) {
+        if (expectSet) {
+            std::cerr << "FAIL: CHD_TEST_EXPECT_NN_BACKEND=" << expect
+                      << " but the ONNX Runtime backend is not built.\n";
+            return 1;
+        }
         std::cout << "Skipping real-model load test (ONNX Runtime backend not built).\n";
         return 0;
     }
     const std::string modelPath = chd_test::modelFromEnvOrFixture("CHD_TEST_NN_MODEL");
     if (modelPath.empty()) {
+        if (expectSet) {
+            std::cerr << "FAIL: CHD_TEST_EXPECT_NN_BACKEND=" << expect
+                      << " but no model fixture is available.\n";
+            return 1;
+        }
         std::cout << "Skipping real-model load test (no model fixture available).\n";
         return 0;
     }
@@ -252,11 +269,10 @@ int testLoadRealModel() {
 
     // A GPU provider that fails to attach falls back to CPU with the suite
     // still green, so pass/fail alone can't tell a GPU run from a silent CPU
-    // one. CI sets CHD_TEST_EXPECT_NN_BACKEND to the chd_nn_backend_t value
-    // the job exists to prove (12 ORT+CUDA, 13 ORT+TensorRT, 16 ORT+MIGraphX)
-    // and this turns the fallback into a failure.
-    if (const char *expect = std::getenv("CHD_TEST_EXPECT_NN_BACKEND");
-        expect != nullptr && *expect != '\0') {
+    // one. The expected value is a chd_nn_backend_t: the one the job exists to
+    // prove (12 ORT+CUDA, 13 ORT+TensorRT, 16 ORT+MIGraphX). This turns the
+    // fallback into a failure.
+    if (expectSet) {
         REQUIRE(static_cast<int>(memBackend) == std::atoi(expect));
     }
 

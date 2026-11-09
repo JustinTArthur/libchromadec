@@ -50,9 +50,10 @@
  * not a gate — the test suite is — so a partially complete sweep is a success.
  */
 
-/* Examples build by default on every platform, so this has to compile with
- * MSVC as well as gcc/clang. clock_gettime is POSIX — absent on MSVC, and
- * hidden by glibc under -std=c11 without the feature macro. */
+/* The build workflow's Linux, macOS and Windows legs configure
+ * with_examples=true, so this has to compile with MSVC as well as gcc/clang.
+ * clock_gettime is POSIX: absent on MSVC, and hidden by glibc under -std=c11
+ * without the feature macro. */
 #if !defined(_WIN32)
 #  define _POSIX_C_SOURCE 200809L
 #endif

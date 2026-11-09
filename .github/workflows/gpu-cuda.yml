@@ -246,6 +246,10 @@ jobs:
         run: |
           for ep in cuda tensorrt; do
             so="$ORT_ROOT/lib/libonnxruntime_providers_${ep}.so"
+            # ldd's own failure is swallowed by the assignment below, so a
+            # provider the archive never shipped would leave $missing empty and
+            # pass the check that exists to catch exactly that.
+            test -e "$so" || { echo "no $ep provider at $so" >&2; exit 1; }
             missing=$(ldd "$so" | awk '/not found/ {print $1}')
             if [ -n "$missing" ]; then
               echo "$ep provider cannot load; the EP would fall back to CPU:" >&2
